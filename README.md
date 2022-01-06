@@ -9,6 +9,25 @@ fairs to customize their solutions.
 
 This package provides some automation to assist there.
 
+# Requirements
+- Python 3.9
+- an active STEMWizard site
+- an account on that site with administrative privledges 
+- requests, bs4 (BeautifulSoup), pandas, and xlrd packages (see requirements.txt)
+
+
+# Installation
+1. download the package<BR>
+   ``git clone https://github.com/rtphokie/stemwizardapi.git``
+1. create a virtual environment, and activate it (highly recommended)<BR> 
+   ``python3 -m venv venv``<BR>
+   ``source venv/bin/activate``
+1. update the username, password, and region name (from what appears before .stemwizard.com in your URL) in the stemwizadapi.yaml file
+
+# Usage
+
+   
+
 
 ## Features
 - Fetches student data

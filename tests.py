@@ -1,7 +1,7 @@
 import unittest
 from pprint import pprint
-from stemwizard_automation import StemWizard
-
+from STEMWizard import StemWizard
+import os
 
 class MyTestCase(unittest.TestCase):
     def test_config(self):
@@ -17,7 +17,6 @@ class MyTestCase(unittest.TestCase):
 
     def test_xls(self):
         uut = StemWizard()
-        uut.login()
         filename, df = uut.export_student_list()
         self.assertGreater(len(filename), 30)
         self.assertTrue(os.path.exists(filename))
@@ -26,14 +25,13 @@ class MyTestCase(unittest.TestCase):
 
     def test_student_data(self):
         uut = StemWizard()
-        data = uut.student_info(fileinfo=True, download=False)
+        data = uut.student_status(fileinfo=True, download=False)
         pprint(data)
 
     def test_file_detail(self):
         uut = StemWizard()
-        uut.login()
         data = uut.student_file_detail(53240, 61630)
-        pprint(data)
+        self.assertGreaterEqual(len(data), 3)
 
 
 if __name__ == '__main__':
