@@ -5,6 +5,7 @@ import pandas as pd
 import olefile
 import os
 import yaml
+from STEMWizard.logstuff import logger
 
 pd.set_option('display.max_columns', None)
 headers = {
@@ -44,6 +45,7 @@ class STEMWizardAPI(object):
 
     def __del__(self):
         self.session.close()
+        logger.info(f"destroyed session with {self.domain}")
 
     def _read_config(self, configfile):
         '''
@@ -80,10 +82,12 @@ class STEMWizardAPI(object):
         if data['region_id'] is not None:
             self.region_id = data['region_id']
         else:
+            logger.error(f"region id not found on login page")
             raise ValueError('region id not found on login page')
         if data['region_domain'] is not None:
             self.region_domain = data['region_domain']
         else:
+            logger.error(f"region domain not found on login page")
             raise ValueError('region domain not found on login page')
 
     def login(self):
@@ -108,6 +112,11 @@ class STEMWizardAPI(object):
         # self.token = token
         # self.region_id = payload['region_id']
         authenticated = rp.status_code == 200
+        if authenticated:
+            logger.info(f"authenticated to {self.domain}")
+        else:
+            logger.error(f"failed to authenticate to {self.domain}")
+
         return authenticated
 
     def export_student_list(self, purge_file=False):
@@ -314,17 +323,24 @@ class STEMWizardAPI(object):
         fp.close()
 
     def get_csrf_token(self, endpoint='filesAndForms'):
+
         if endpoint not in self.csrf.keys():
             self.csrf[endpoint] = None
+        else:
+            logger.debug(f"using existing CSRF token for {endpoint}")
+
         if self.csrf[endpoint] is None:
+            logger.debug(f"looking for CSRF token for {endpoint}")
             url = f'{self.url_base}/{endpoint}'
             r = self.session.get(url, headers=headers)
             soup = BeautifulSoup(r.text, 'lxml')
             csrf = soup.find('meta', {'name': 'csrf-token'})
             if csrf is not None:
                 self.csrf[endpoint] = csrf.get('content')
+            logger.debug(f"CSRF token for {endpoint} is {self.csrf[endpoint]}")
 
     def student_status(self, debug=True, fileinfo=False, download=True):
+        logger.debug(f"in student_status, fileinfo {fileinfo}, download {download}")
         payload = {'_token': self.token,
                    'page': 1,
                    'category_select': '',
@@ -355,7 +371,8 @@ class STEMWizardAPI(object):
                    }
         self.get_csrf_token(endpoint='filesAndForms')
 
-        r = self.session.post(f'{self.url_base}/filesAndForms/getStudentData', data=payload, headers=headers,
+        url = f'{self.url_base}/filesAndForms/getStudentData'
+        r = self.session.post(url, data=payload, headers=headers,
                               stream=True)
 
         soup = BeautifulSoup(r.text, 'lxml')
@@ -399,12 +416,13 @@ class STEMWizardAPI(object):
                     param = param.replace(f"click_class", '').replace(f'_{studentid}', '')
                     data[studentid][param] = value
             if fileinfo:
-                data[studentid]['files'] = self.student_file_detail(studentid, data[studentid]['student_info_id'],
-                                                                    download=download)
+                logger.debug(f"making AJAX call for finfo for {studentid} {data[studentid]['f_name']} {data[studentid]['l_name']}")
+                data[studentid]['files'] = self.student_file_detail(studentid, data[studentid]['student_info_id'], download=download)
+        logger.info(f'got {len(data)} rows from {url}')
         return data
 
     def student_file_detail(self, studentId, info_id, download=True):
-        print(f"getting file details for {studentId}")
+        logger.debug(f"getting file details for {studentId}")
         self.get_csrf_token(endpoint='filesAndForms')
         url = f'{self.url_base}/filesAndForms/studentFormsAndFilesDetailedView'
         payload = {'studentId': studentId, 'info_id': info_id}
@@ -451,20 +469,75 @@ class STEMWizardAPI(object):
                 if value is not None:
                     data[filetype][params[n]] = value
             if download and data[filetype]['file_status'] in ['SUBMITTED', 'APPROVED']:
+                logger.info(f"downloading {studentId} {data[filetype]['file_name']}")
                 self.DownloadFile(data[filetype]['file_url'], f"{studentId}/{filetype.replace(' ', '_')}",
                                   data[filetype]['file_name'])
         return data
 
     def DownloadFile(self, url, local_dir, local_filename, parent_dir='files'):
-        print(f"  downloading {local_filename} into {local_dir}")
-        os.makedirs(f"{parent_dir}/{local_dir}", exist_ok=True)
+        '''
+
+        :param url:
+        :param local_dir:
+        :param local_filename:
+        :param parent_dir:
+        :return:
+        '''
+        target_dir = f"{parent_dir}/{local_dir}"
+        full_pathname = f"{parent_dir}/{local_dir}{local_filename}"
+        logger.debug(f"downloading {url} to {full_pathname}")
+        os.makedirs(target_dir, exist_ok=True)
         r = self.session.get(url)
-        f = open(f"{parent_dir}/{local_dir}/{local_filename}", 'wb')
+        f = open(full_pathname, 'wb')
         for chunk in r.iter_content(chunk_size=512 * 1024):
             if chunk:  # filter out keep-alive new chunks
                 f.write(chunk)
         f.close()
         return local_filename
+
+    def export_list(self, listname="judge", purge_file=False):
+        if self.token is None:
+            raise ValueError('no token found in object, login before calling export_student_list')
+        self.set_columns(listname=listname)
+        return None, None
+        payload = {'_token': self.token,
+                   'filetype': 'xls',
+                   'orderby1': '',
+                   'sortby1': '',
+                   'searchhere1': '',
+                   'category_select1': '',
+                   'judge_types1': '',
+                   'status_select1': '',
+                   'final_assigned_category_select1': '',
+                   'division_judge1': 0,
+                   'assigned_division1': 0,
+                   'special_awards_judge1': '',
+                   'assigned_lead_judge1': '',
+                   'judge_checkin_status1': '',
+                   'judge_activation_status1': '',
+                   'checked_fields_header': '',
+                   'checked_fields': '',
+                   'class_id1': '',
+                   'last_year': '',
+                   'dashBoardPage1': '',
+                   }
+
+        url = f'{self.url_base}/fairadmin/export_file_judge'
+        rf = self.session.post(url, data=payload, headers=headers, stream=True)
+        if rf.status_code != 200:
+            raise ValueError(f"status code {rf.status_code}")
+        pprint(rf.headers)
+        local_filename = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
+
+        self._download_file(local_filename, rf)
+        rf.close()
+
+        df = self.xlsfile_to_df(local_filename)
+
+        if purge_file:
+            self._safe_rm_file(local_filename)
+
+        return (local_filename, df)
 
 
 if __name__ == '__main__':

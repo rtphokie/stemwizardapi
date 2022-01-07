@@ -31,9 +31,8 @@ class MyTestCase(unittest.TestCase):
 
     def test_student_data(self):
         uut = STEMWizardAPI(configfile=configfile)
-        print(uut.authenticated)
 
-        data = uut.student_status(fileinfo=True, download=False)
+        data = uut.student_status(fileinfo=True, download=True)
         self.assertGreaterEqual(len(data), 3)
         self.assertGreaterEqual(len(data[list(data.keys())[0]]['files']), 5)
 
@@ -42,6 +41,8 @@ class MyTestCase(unittest.TestCase):
         data = uut.student_file_detail(53240, 61630)
         self.assertGreaterEqual(len(data), 3)
 
-
+    def test_export(self):
+        uut = STEMWizardAPI(configfile=configfile)
+        filename, df = uut.export_list(listname='judge')
 if __name__ == '__main__':
     unittest.main()
