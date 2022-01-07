@@ -1,22 +1,23 @@
 import unittest
 from pprint import pprint
-from STEMWizard import StemWizard
+from STEMWizard import STEMWizardAPI
 import os
 
 class MyTestCase(unittest.TestCase):
     def test_config(self):
-        uut = StemWizard()
+        uut = STEMWizardAPI(configfile='stemwizardapi_prod.yaml')
         self.assertEqual(uut.username, 'rtphokie')
         self.assertGreaterEqual(len(uut.password), 0)
 
     def test_login(self):
-        uut = StemWizard()
+        uut = STEMWizardAPI(configfile='stemwizardapi_prod.yaml')
+        self.assertTrue(uut.authenticated)
         self.assertEqual(40, len(uut.token))
         self.assertGreaterEqual(len(uut.domain), 4)
         self.assertGreaterEqual(int(uut.region_id), 4000)
 
     def test_xls(self):
-        uut = StemWizard()
+        uut = STEMWizardAPI(configfile='stemwizardapi_prod.yaml')
         filename, df = uut.export_student_list()
         self.assertGreater(len(filename), 30)
         self.assertTrue(os.path.exists(filename))
@@ -24,7 +25,7 @@ class MyTestCase(unittest.TestCase):
         self.assertGreaterEqual(df.shape[1], 32, 'fewer columns than expected')
 
     def test_student_data(self):
-        uut = StemWizard()
+        uut = STEMWizardAPI(configfile='stemwizardapi_prod.yaml')
         data = uut.student_status(fileinfo=True, download=False)
         pprint(data)
 

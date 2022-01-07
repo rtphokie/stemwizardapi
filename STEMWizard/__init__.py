@@ -135,6 +135,7 @@ class STEMWizardAPI(object):
                    }
 
         rf = session.post(f'{self.url_base}/fairadmin/export_file', data=payload, headers=headers, stream=True)
+        pprint(rf.headers)
         local_filename = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
 
         fp = open(local_filename, 'wb')
@@ -173,8 +174,8 @@ class STEMWizardAPI(object):
                    'assigned_lead_judge1': '',
                    'judge_checkin_status1': '',
                    'judge_activation_status1': '',
-                   'checked_fields_header': "TITLE",#,FIRST NAME,LAST NAME,ADDRESS,CITY,STATE,ZIP,PHONE,EMAIL,HIGHEST DEGREE ATTAINED  ,YEARS OF EXP,PREFERRED CATEGORIES (EXPERTISE),COMMENT,REGISTERED DATE,SKILLS AND EXPERIENCE,ORGANIZATION / EMPLOYER,PROFESSIONAL ORGANIZATION,REGISTRATION STATUS,PREFERRED DIVISION,LEAD JUDGE,SPECIAL AWARD JUDGE,ASSIGNED DIVISION,ROUND 1 CATEGORIES,ROUND 2 CATEGORIES,SPECIAL AWARDS,ORIGIN FAIR ,MENTORING,RELATED TO STUDENT,AVAILABILITY,JUDGE TYPES,ASSIGNED LEAD JUDGE",
-                   'checked_fields': "judge.judge_title as judge_title",#,judge.f_name as f_name,judge.l_name as l_name,judge.address as address,judge.city as city,state.state_name as state_name,judge.zip as zip,judge.phone as phone,judge.email as email,degree as degree,exp_related_field as exp_related_field,judge.judge_id as preferred_category,comments as comments,judge.created_date as created_date,skills_exp as skills_exp,employer as employer,professional_organization as professional_organization,CASE judge.judge_profile_status WHEN '1' THEN 'Incomplete' WHEN '2' THEN 'Complete' WHEN '3' THEN 'Assigned' WHEN '4' THEN 'Confirmed' WHEN '5' THEN 'Alternate' WHEN '6' THEN 'Withdrawn' end as judge_profile_status,(SELECT division_name FROM division WHERE division_id = judge.division) as pref_division,willing_judgelead as willing_judgelead,special_award_lead as special_award_lead,(SELECT GROUP_CONCAT(division_name) FROM division WHERE division_id IN ((SELECT DISTINCT judge_assign_category.assigned_division FROM judge_assign_category WHERE judge_assign_category.assign_judge_id=judge.judge_id ))) AS assigned_division_name,group_concat( category_management.cat_name ) AS cat_name1,group_concat( category_management.cat_name ) AS cat_name2,case fair_spl_award_management.spl_award_name when '' then 'No Special Award' else fair_spl_award_management.spl_award_name end as special_award_name,origion_fair,region_wise_judge.mentor_applicant_name,region_wise_judge.applicant_name,region_wise_judge.judge_availability,group_concat( judge_types.judge_type_name ) AS judge_type_name_display,region_wise_judge.assign_lead_judge",
+                   'checked_fields_header': '',
+                   'checked_fields': '',
                    'class_id1': '',
                    'last_year': '',
                    'dashBoardPage1': '',
@@ -182,8 +183,6 @@ class STEMWizardAPI(object):
 
         #https://ncsef.stemwizard.com/fairadmin/export_file_judge
         url = f'{self.url_base}/fairadmin/export_file_judge'
-        print(url)
-        pprint(payload)
         rf = session.post(url, data=payload, headers=headers, stream=True)
         if rf.status_code != 200:
             raise ValueError(f"status code {rf.status_code}")
