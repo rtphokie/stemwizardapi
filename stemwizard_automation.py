@@ -18,9 +18,9 @@ def stats(listname, df, filename, columns):
 def get_args():
     global args
     parser = argparse.ArgumentParser(description='synchronize with STEM Wizard')
-    parser.add_argument('-student', help='gather student data', action='store_true')
-    parser.add_argument('-judge', help='gather judge data', action='store_true')
-    parser.add_argument('-volunteer', help='gather volunteer data', action='store_true')
+    parser.add_argument('-students', help='gather student data', action='store_true')
+    parser.add_argument('-judges', help='gather judge data', action='store_true')
+    parser.add_argument('-volunteers', help='gather volunteer data', action='store_true')
     parser.add_argument('-files', help='fetch files and forms metadata', action='store_true')
     parser.add_argument('-download', help='download files and forms', action='store_true')
     parser.add_argument('--configfile', help='download files and forms', default='stemwizardapi.yaml')
@@ -29,19 +29,19 @@ def get_args():
 
 if __name__ == '__main__':
     get_args()
-    if args.volunteer:
-        raise ValueError("volunteer automation not implemented")
 
     sw = STEMWizardAPI(configfile=args.configfile)
     if args.download:
         data = sw.student_status(fileinfo=True, download=False)
-    elif args.judge:
+    elif args.judges:
         filename, df = sw.export_judge_list()
         stats('judges', df, filename, ['HIGHEST DEGREE ATTAINED', 'SPECIAL AWARD JUDGE',
                                        'CITY', 'ORGANIZATION / EMPLOYER', 'REGISTRATION STATUS'])
-    elif args.student:
+    elif args.students:
         filename, df = sw.export_student_list()
         stats('students', df, filename,  ['approval status',
                                           'payment status', 'final status'])
+    else:
+        print('not implemented')
 
 
