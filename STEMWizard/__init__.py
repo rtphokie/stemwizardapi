@@ -7,7 +7,6 @@ import os
 import yaml
 
 pd.set_option('display.max_columns', None)
-session = requests.Session()  # shared session, maintains cookies throughout
 headers = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36'}
 
@@ -21,6 +20,7 @@ class STEMWizardAPI(object):
         :param configfile: configfile: (default to stemwizardapi.yaml)
         '''
         self.authenticated = None
+        self.session = requests.Session()  # shared session, maintains cookies throughout
         self.region_domain = None
         self.region_id = None
         self.csrf = {}  # assuming Cross Site Request Forgery prevention tokens are on a per endpoint basis.
@@ -42,6 +42,9 @@ class STEMWizardAPI(object):
             raise ValueError(
                 f'STEM Wizard returned a region domain of {self.region_domain}, which varies from the {self.domain} value in the config file')
 
+    def __del__(self):
+        self.session.close()
+
     def _read_config(self, configfile):
         '''
         reads named yaml configuration file
@@ -61,7 +64,7 @@ class STEMWizardAPI(object):
         :return: nothing, updates region_id, region_domain, and token parameters on object
         '''
         url = f'{self.url_base}/admin/login'
-        r = session.get(url, headers=headers, allow_redirects=True)
+        r = self.session.get(url, headers=headers, allow_redirects=True)
 
         # scrape token
         soup = BeautifulSoup(r.text, 'html.parser')
@@ -100,7 +103,8 @@ class STEMWizardAPI(object):
 
         url_login = f'{self.url_base}/admin/authenticate'
 
-        rp = session.post(url_login, data=payload, headers=headers, allow_redirects=True)  # , cookies=session_cookies)
+        rp = self.session.post(url_login, data=payload, headers=headers,
+                               allow_redirects=True)  # , cookies=session_cookies)
         # self.token = token
         # self.region_id = payload['region_id']
         authenticated = rp.status_code == 200
@@ -134,8 +138,7 @@ class STEMWizardAPI(object):
                    'last_year': '',
                    }
 
-        rf = session.post(f'{self.url_base}/fairadmin/export_file', data=payload, headers=headers, stream=True)
-        pprint(rf.headers)
+        rf = self.session.post(f'{self.url_base}/fairadmin/export_file', data=payload, headers=headers, stream=True)
         local_filename = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
 
         fp = open(local_filename, 'wb')
@@ -229,7 +232,7 @@ class STEMWizardAPI(object):
         else:
             raise ValueError(f'unhandled list name {listname} in set_columns')
 
-        r1 = session.post(url, data=payload, headers=headers)
+        r1 = self.session.post(url, data=payload, headers=headers)
         if r1.status_code != 200:
             raise ValueError(f"status code {r1.status_code}")
 
@@ -244,7 +247,7 @@ class STEMWizardAPI(object):
 
         # set all columns to be visible
         url2 = f'{self.url_base}/fairadmin/saveStudentColumnSettings'
-        r2 = session.post(url2, data=payload, headers=headers)
+        r2 = self.session.post(url2, data=payload, headers=headers)
         if r2.status_code != 200:
             raise ValueError(f"status code {r2.status_code} from POST to {url2}")
 
@@ -275,7 +278,7 @@ class STEMWizardAPI(object):
                    }
 
         url = f'{self.url_base}/fairadmin/export_file_judge'
-        rf = session.post(url, data=payload, headers=headers, stream=True)
+        rf = self.session.post(url, data=payload, headers=headers, stream=True)
         if rf.status_code != 200:
             raise ValueError(f"status code {rf.status_code}")
         pprint(rf.headers)
@@ -315,7 +318,7 @@ class STEMWizardAPI(object):
             self.csrf[endpoint] = None
         if self.csrf[endpoint] is None:
             url = f'{self.url_base}/{endpoint}'
-            r = session.get(url, headers=headers)
+            r = self.session.get(url, headers=headers)
             soup = BeautifulSoup(r.text, 'lxml')
             csrf = soup.find('meta', {'name': 'csrf-token'})
             if csrf is not None:
@@ -352,7 +355,8 @@ class STEMWizardAPI(object):
                    }
         self.get_csrf_token(endpoint='filesAndForms')
 
-        r = session.post(f'{self.url_base}/filesAndForms/getStudentData', data=payload, headers=headers, stream=True)
+        r = self.session.post(f'{self.url_base}/filesAndForms/getStudentData', data=payload, headers=headers,
+                              stream=True)
 
         soup = BeautifulSoup(r.text, 'lxml')
         body = soup.find('tbody')
@@ -408,7 +412,7 @@ class STEMWizardAPI(object):
         headers['X-CSRF-TOKEN'] = self.csrf['filesAndForms']
         headers['Referer'] = f'{self.url_base}/filesAndForms'
         headers['X-Requested-With'] = 'XMLHttpRequest'
-        rfaf = session.post(url, data=payload, headers=headers)
+        rfaf = self.session.post(url, data=payload, headers=headers)
         fp = open('foo.html', 'w')
         fp.write(rfaf.text)
         fp.close()
@@ -447,21 +451,20 @@ class STEMWizardAPI(object):
                 if value is not None:
                     data[filetype][params[n]] = value
             if download and data[filetype]['file_status'] in ['SUBMITTED', 'APPROVED']:
-                DownloadFile(data[filetype]['file_url'], f"{studentId}/{filetype.replace(' ', '_')}",
-                             data[filetype]['file_name'])
+                self.DownloadFile(data[filetype]['file_url'], f"{studentId}/{filetype.replace(' ', '_')}",
+                                  data[filetype]['file_name'])
         return data
 
-
-def DownloadFile(url, local_dir, local_filename, parent_dir='files'):
-    print(f"  downloading {local_filename} into {local_dir}")
-    os.makedirs(f"{parent_dir}/{local_dir}", exist_ok=True)
-    r = session.get(url)
-    f = open(f"{parent_dir}/{local_dir}/{local_filename}", 'wb')
-    for chunk in r.iter_content(chunk_size=512 * 1024):
-        if chunk:  # filter out keep-alive new chunks
-            f.write(chunk)
-    f.close()
-    return local_filename
+    def DownloadFile(self, url, local_dir, local_filename, parent_dir='files'):
+        print(f"  downloading {local_filename} into {local_dir}")
+        os.makedirs(f"{parent_dir}/{local_dir}", exist_ok=True)
+        r = self.session.get(url)
+        f = open(f"{parent_dir}/{local_dir}/{local_filename}", 'wb')
+        for chunk in r.iter_content(chunk_size=512 * 1024):
+            if chunk:  # filter out keep-alive new chunks
+                f.write(chunk)
+        f.close()
+        return local_filename
 
 
 if __name__ == '__main__':
