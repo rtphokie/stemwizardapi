@@ -8,6 +8,12 @@ configfile = 'stemwizardapi.yaml'
 
 class MyTestCase(unittest.TestCase):
 
+    def test_create_student(self):
+        uut = STEMWizardAPI(configfile=configfile)
+        data={}
+        uut.create_student(data)
+
+
     def test_setcolumns(self):
         # results are not really testable in this context, so looking for exceptions here
         uut = STEMWizardAPI(configfile=configfile)
