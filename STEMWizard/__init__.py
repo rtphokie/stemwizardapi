@@ -40,6 +40,7 @@ def WebKit_format(data, headers=None):
     args_str = args_str.replace("\'", "\"")
     return args_str
 
+
 class STEMWizardAPI(object):
 
     def __init__(self, configfile='stemwizardapi.yaml'):
@@ -147,91 +148,6 @@ class STEMWizardAPI(object):
             self.logger.error(f"failed to authenticate to {self.domain}")
 
         return authenticated
-
-    def create_student(self, data):
-        '''
-        not yet functional
-
-        :param data:
-        :return:
-        '''
-
-        url = 'https://ncregtest.stemwizard.com/fairadmin/student/store'
-        payload = {'_token': self.token,
-                   'project_type': '0',
-                   'hidden_team_reg_status': 1,
-                   'from_page': 'FAIRADMIN',
-                   'user_id': '1776',
-                   'region_domain': 'ncregtest',
-                   'localization_id': '1',
-                   'email_unique': '1',
-                   'require_address_city_state_zip': '1',
-                   'require_gender': '1',
-                   'require_student_sec_email': '1',
-                   'firstname': 'TESTFIRST',
-                   'middlename': '',
-                   'lastname': 'TESTLAST',
-                   'address': '123 Any Street',
-                   'city': 'Kill Devil Hills',
-                   'state': '35',
-                   'zip': '90120',
-                   'phone': '7405551212',
-                   'ext': '',
-                   'gender': '121189',
-                   'grade': '10',
-                   'email': 'TEST@fake.com',
-                   're_enter_email': 'TEST@fake.com',
-                   'sec_email': 'TESTparent@fake.com',
-                   're_enter_sec_email': 'TESTparent@fake.com',
-                   'username': 'TESTUSERID',
-                   'userpassword': 'gvPSl!PkYrfKN',
-                   'userpasswordconfirm': 'gvPSli!PkYrfKN',
-                   'txt_sms_phone': '1',
-                   'middlename1': '',
-                   'grade1': '',
-                   're_enter_sec_email1': '',
-                   'txt_sms_phone1': '1',
-                   'middlename2': '',
-                   'grade2': '',
-                   're_enter_email2': '',
-                   're_enter_sec_email2': '',
-                   'division': '1188',
-                   'division_count': '3',
-                   'pref_cat': '25976',
-                   'hdn_division_id': '',
-                   'fetched_student_region_id': '44678',
-                   'fetched_student_type': 'fair',
-                   }
-
-        # boundary = '----WebKitFormBoundary' + ''.join(random.sample(string.ascii_letters + string.digits, 16))
-        # m = MultipartEncoder(fields=payload, boundary=boundary)
-        headers2=headers.copy()
-        headers2['Origin']='https://ncregtest.stemwizard.com'
-        headers2['Referer']='https://ncregtest.stemwizard.com/fairadmin/student/create'
-        headers2['Sec-Fetch-Dest']='document'
-        headers2['Sec-Fetch-Mode']='navigate'
-        headers2['Sec-Fetch-Site']='same-origin'
-        headers2['Sec-Fetch-User']='?1'
-        headers2['Sec-GPC']='1'
-        headers2['Upgrade-Insecure-Requests']='1'
-        # headers['Content-Type']=m.content_type
-        # print(m.content_type)
-        boundary_body = WebKit_format(data=payload, headers=headers2)
-        rc = self.session.post(url, data=boundary_body, headers=headers2, allow_redirects = False)
-        print(url)
-        print(rc.status_code)
-        pprint(rc.headers)
-        fp = open('foo.html', 'wb')
-        fp.write(rc.content)
-        fp.close()
-        if 'omething went wrong' in rc.text:
-            raise('something went wrong')
-        rc2 = self.session.get(rc.headers['Location'], headers=headers, allow_redirects = False)
-        print(rc2.status_code)
-        fp = open('foo2.html', 'wb')
-        fp.write(rc2.content)
-        fp.close()
-        # print(rc.text)
 
     def export_student_list(self, purge_file=False):
         if self.token is None:
@@ -525,8 +441,10 @@ class STEMWizardAPI(object):
                     param = param.replace(f"click_class", '').replace(f'_{studentid}', '')
                     data[studentid][param] = value
             if fileinfo:
-                self.logger.debug(f"making AJAX call for finfo for {studentid} {data[studentid]['f_name']} {data[studentid]['l_name']}")
-                data[studentid]['files'] = self.student_file_detail(studentid, data[studentid]['student_info_id'], download=download)
+                self.logger.debug(
+                    f"making AJAX call for finfo for {studentid} {data[studentid]['f_name']} {data[studentid]['l_name']}")
+                data[studentid]['files'] = self.student_file_detail(studentid, data[studentid]['student_info_id'],
+                                                                    download=download)
         self.logger.info(f'got {len(data)} rows from {url}')
         return data
 
