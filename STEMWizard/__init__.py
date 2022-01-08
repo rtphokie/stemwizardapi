@@ -5,7 +5,7 @@ import pandas as pd
 import olefile
 import os
 import yaml
-from STEMWizard.logstuff import logger
+from STEMWizard.logstuff import get_logger
 
 pd.set_option('display.max_columns', None)
 headers = {
@@ -22,13 +22,14 @@ class STEMWizardAPI(object):
         '''
         self.authenticated = None
         self.session = requests.Session()  # shared session, maintains cookies throughout
-        self.region_domain = None
+        self.region_domain = 'unknown'
         self.region_id = None
-        self.csrf = {}  # assuming Cross Site Request Forgery prevention tokens are on a per endpoint basis.
+        self.csrf = None
         self.username = None
         self.password = None
 
         self._read_config(configfile)
+        self.logger = get_logger(self.domain)
         if self.username is None or len(self.username) < 6:
             raise ValueError(f'did not find a valid username in {configfile}')
         if self.password is None or len(self.password) < 6:
@@ -45,7 +46,7 @@ class STEMWizardAPI(object):
 
     def __del__(self):
         self.session.close()
-        logger.info(f"destroyed session with {self.domain}")
+        self.logger.info(f"destroyed session with {self.domain}")
 
     def _read_config(self, configfile):
         '''
@@ -82,12 +83,12 @@ class STEMWizardAPI(object):
         if data['region_id'] is not None:
             self.region_id = data['region_id']
         else:
-            logger.error(f"region id not found on login page")
+            self.logger.error(f"region id not found on login page")
             raise ValueError('region id not found on login page')
         if data['region_domain'] is not None:
             self.region_domain = data['region_domain']
         else:
-            logger.error(f"region domain not found on login page")
+            self.logger.error(f"region domain not found on login page")
             raise ValueError('region domain not found on login page')
 
     def login(self):
@@ -113,9 +114,9 @@ class STEMWizardAPI(object):
         # self.region_id = payload['region_id']
         authenticated = rp.status_code == 200
         if authenticated:
-            logger.info(f"authenticated to {self.domain}")
+            self.logger.info(f"authenticated to {self.domain}")
         else:
-            logger.error(f"failed to authenticate to {self.domain}")
+            self.logger.error(f"failed to authenticate to {self.domain}")
 
         return authenticated
 
@@ -180,8 +181,8 @@ class STEMWizardAPI(object):
             endpoint = 'fairadmin/volunteers'
         else:
             endpoint = f'fairadmin/{listname}'
-        self.get_csrf_token(endpoint=endpoint)
-        headers['X-CSRF-TOKEN'] = self.csrf[endpoint]
+        self.get_csrf_token()
+        headers['X-CSRF-TOKEN'] = self.csrf
         headers['Referer'] = f'{self.url_base}f/fairadmin/{listname}'
         headers['X-Requested-With'] = 'XMLHttpRequest'
 
@@ -322,25 +323,20 @@ class STEMWizardAPI(object):
         fp.flush()
         fp.close()
 
-    def get_csrf_token(self, endpoint='filesAndForms'):
-
-        if endpoint not in self.csrf.keys():
-            self.csrf[endpoint] = None
+    def get_csrf_token(self):
+        if self.csrf is not None:
+            self.logger.debug(f"using existing CSRF token")
         else:
-            logger.debug(f"using existing CSRF token for {endpoint}")
-
-        if self.csrf[endpoint] is None:
-            logger.debug(f"looking for CSRF token for {endpoint}")
-            url = f'{self.url_base}/{endpoint}'
+            url = f'{self.url_base}/filesAndForms'
             r = self.session.get(url, headers=headers)
             soup = BeautifulSoup(r.text, 'lxml')
             csrf = soup.find('meta', {'name': 'csrf-token'})
             if csrf is not None:
-                self.csrf[endpoint] = csrf.get('content')
-            logger.debug(f"CSRF token for {endpoint} is {self.csrf[endpoint]}")
+                self.csrf = csrf.get('content')
+            self.logger.debug(f"gathered CSRF token {self.csrf}")
 
     def student_status(self, debug=True, fileinfo=False, download=True):
-        logger.debug(f"in student_status, fileinfo {fileinfo}, download {download}")
+        self.logger.debug(f"in student_status, fileinfo {fileinfo}, download {download}")
         payload = {'_token': self.token,
                    'page': 1,
                    'category_select': '',
@@ -369,7 +365,7 @@ class STEMWizardAPI(object):
                    'from_page': 'FAIRADMIN',
                    'student_activation_status': '',
                    }
-        self.get_csrf_token(endpoint='filesAndForms')
+        self.get_csrf_token()
 
         url = f'{self.url_base}/filesAndForms/getStudentData'
         r = self.session.post(url, data=payload, headers=headers,
@@ -416,18 +412,18 @@ class STEMWizardAPI(object):
                     param = param.replace(f"click_class", '').replace(f'_{studentid}', '')
                     data[studentid][param] = value
             if fileinfo:
-                logger.debug(f"making AJAX call for finfo for {studentid} {data[studentid]['f_name']} {data[studentid]['l_name']}")
+                self.logger.debug(f"making AJAX call for finfo for {studentid} {data[studentid]['f_name']} {data[studentid]['l_name']}")
                 data[studentid]['files'] = self.student_file_detail(studentid, data[studentid]['student_info_id'], download=download)
-        logger.info(f'got {len(data)} rows from {url}')
+        self.logger.info(f'got {len(data)} rows from {url}')
         return data
 
     def student_file_detail(self, studentId, info_id, download=True):
-        logger.debug(f"getting file details for {studentId}")
-        self.get_csrf_token(endpoint='filesAndForms')
+        self.logger.debug(f"getting file details for {studentId}")
+        self.get_csrf_token()
         url = f'{self.url_base}/filesAndForms/studentFormsAndFilesDetailedView'
         payload = {'studentId': studentId, 'info_id': info_id}
 
-        headers['X-CSRF-TOKEN'] = self.csrf['filesAndForms']
+        headers['X-CSRF-TOKEN'] = self.csrf
         headers['Referer'] = f'{self.url_base}/filesAndForms'
         headers['X-Requested-With'] = 'XMLHttpRequest'
         rfaf = self.session.post(url, data=payload, headers=headers)
@@ -469,7 +465,7 @@ class STEMWizardAPI(object):
                 if value is not None:
                     data[filetype][params[n]] = value
             if download and data[filetype]['file_status'] in ['SUBMITTED', 'APPROVED']:
-                logger.info(f"downloading {studentId} {data[filetype]['file_name']}")
+                self.logger.info(f"downloading {studentId} {data[filetype]['file_name']}")
                 self.DownloadFile(data[filetype]['file_url'], f"{studentId}/{filetype.replace(' ', '_')}",
                                   data[filetype]['file_name'])
         return data
@@ -485,7 +481,7 @@ class STEMWizardAPI(object):
         '''
         target_dir = f"{parent_dir}/{local_dir}"
         full_pathname = f"{parent_dir}/{local_dir}{local_filename}"
-        logger.debug(f"downloading {url} to {full_pathname}")
+        self.logger.debug(f"downloading {url} to {full_pathname}")
         os.makedirs(target_dir, exist_ok=True)
         r = self.session.get(url)
         f = open(full_pathname, 'wb')
