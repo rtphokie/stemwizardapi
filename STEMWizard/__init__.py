@@ -149,35 +149,71 @@ class STEMWizardAPI(object):
 
         return authenticated
 
-    def export_student_list(self, purge_file=False):
+    def export_list(self, listname, purge_file=False):
         if self.token is None:
             raise ValueError('no token found in object, login before calling export_student_list')
+        self.set_columns(listname)
         payload = {'_token': self.token,
                    'filetype': 'xls',
                    'orderby1': '',
                    'sortby1': '',
-                   'searchhere1': '',
-                   'category_select1': '',
-                   'round2_category_select1': '',
-                   'child_fair_select1': '',
-                   'status_select1': '',
-                   'division1': 0,
-                   'classperiod_select1': '',
-                   'student_completion_status1': '',
-                   'student_checkin_status1': '',
-                   'student_activation_status1': '',
-                   'management_user_type_id1': ' 1',
-                   'checked_fields': '',
-                   'class_id1': '',
-                   'admin_status1': '',
-                   'final_status1': '',
-                   'files_approval_status1': '',
-                   'project_status1': '',
-                   'project_score': '',
-                   'last_year': '',
+                   'searchhere1': ''
                    }
+        if listname == 'student':
+            url = f'{self.url_base}/fairadmin/export_file'
+            payload_specific = {
+                'category_select1': '',
+                'round2_category_select1': '',
+                'child_fair_select1': '',
+                'status_select1': '',
+                'division1': 0,
+                'classperiod_select1': '',
+                'student_completion_status1': '',
+                'student_checkin_status1': '',
+                'student_activation_status1': '',
+                'management_user_type_id1': ' 1',
+                'checked_fields': '',
+                'class_id1': '',
+                'admin_status1': '',
+                'final_status1': '',
+                'files_approval_status1': '',
+                'project_status1': '',
+                'project_score': '',
+                'last_year': '',
+            }
+        elif listname == 'judge':
+            url = f'{self.url_base}/fairadmin/export_file_judge'
+            payload_specific = {
+                'category_select1': '',
+                'judge_types1': '',
+                'status_select1': '',
+                'final_assigned_category_select1': '',
+                'division_judge1': 0,
+                'assigned_division1': 0,
+                'special_awards_judge1': '',
+                'assigned_lead_judge1': '',
+                'judge_checkin_status1': '',
+                'judge_activation_status1': '',
+                'checked_fields_header': '',
+                'checked_fields': '',
+                'class_id1': '',
+                'last_year': '',
+                'dashBoardPage1': '',
+            }
+        elif listname == 'volunteer':
+            url = f'{self.url_base}/fairadmin/exportVolunteerExcelPdf'
+            payload_specific = {
+                'searchhere1': '',
+                'registration_status1': '',
+                'last_year': '',
+            }
 
-        rf = self.session.post(f'{self.url_base}/fairadmin/export_file', data=payload, headers=headers, stream=True)
+        else:
+            raise ValueError(f"unknown list {listname}")
+        payload.update(payload_specific)
+
+        self.logger.debug(f'posting to {url} using {listname} params')
+        rf = self.session.post(url, data=payload, headers=headers, stream=True)
         local_filename = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
 
         fp = open(local_filename, 'wb')
@@ -289,49 +325,6 @@ class STEMWizardAPI(object):
         r2 = self.session.post(url2, data=payload, headers=headers)
         if r2.status_code != 200:
             raise ValueError(f"status code {r2.status_code} from POST to {url2}")
-
-    def export_judge_list(self, purge_file=False):
-        self.set_judge_columns()
-        if self.token is None:
-            raise ValueError('no token found in object, login before calling export_student_list')
-        payload = {'_token': self.token,
-                   'filetype': 'xls',
-                   'orderby1': '',
-                   'sortby1': '',
-                   'searchhere1': '',
-                   'category_select1': '',
-                   'judge_types1': '',
-                   'status_select1': '',
-                   'final_assigned_category_select1': '',
-                   'division_judge1': 0,
-                   'assigned_division1': 0,
-                   'special_awards_judge1': '',
-                   'assigned_lead_judge1': '',
-                   'judge_checkin_status1': '',
-                   'judge_activation_status1': '',
-                   'checked_fields_header': '',
-                   'checked_fields': '',
-                   'class_id1': '',
-                   'last_year': '',
-                   'dashBoardPage1': '',
-                   }
-
-        url = f'{self.url_base}/fairadmin/export_file_judge'
-        rf = self.session.post(url, data=payload, headers=headers, stream=True)
-        if rf.status_code != 200:
-            raise ValueError(f"status code {rf.status_code}")
-        pprint(rf.headers)
-        local_filename = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
-
-        self._download_file(local_filename, rf)
-        rf.close()
-
-        df = self.xlsfile_to_df(local_filename)
-
-        if purge_file:
-            self._safe_rm_file(local_filename)
-
-        return (local_filename, df)
 
     def xlsfile_to_df(self, local_filename):
         ole = olefile.OleFileIO(local_filename)
@@ -521,50 +514,6 @@ class STEMWizardAPI(object):
                 f.write(chunk)
         f.close()
         return local_filename
-
-    def export_list(self, listname="judge", purge_file=False):
-        if self.token is None:
-            raise ValueError('no token found in object, login before calling export_student_list')
-        self.set_columns(listname=listname)
-        return None, None
-        payload = {'_token': self.token,
-                   'filetype': 'xls',
-                   'orderby1': '',
-                   'sortby1': '',
-                   'searchhere1': '',
-                   'category_select1': '',
-                   'judge_types1': '',
-                   'status_select1': '',
-                   'final_assigned_category_select1': '',
-                   'division_judge1': 0,
-                   'assigned_division1': 0,
-                   'special_awards_judge1': '',
-                   'assigned_lead_judge1': '',
-                   'judge_checkin_status1': '',
-                   'judge_activation_status1': '',
-                   'checked_fields_header': '',
-                   'checked_fields': '',
-                   'class_id1': '',
-                   'last_year': '',
-                   'dashBoardPage1': '',
-                   }
-
-        url = f'{self.url_base}/fairadmin/export_file_judge'
-        rf = self.session.post(url, data=payload, headers=headers, stream=True)
-        if rf.status_code != 200:
-            raise ValueError(f"status code {rf.status_code}")
-        pprint(rf.headers)
-        local_filename = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
-
-        self._download_file(local_filename, rf)
-        rf.close()
-
-        df = self.xlsfile_to_df(local_filename)
-
-        if purge_file:
-            self._safe_rm_file(local_filename)
-
-        return (local_filename, df)
 
 
 if __name__ == '__main__':

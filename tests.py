@@ -21,13 +21,29 @@ class MyTestCase(unittest.TestCase):
         self.assertGreaterEqual(len(uut.domain), 4)
         self.assertGreaterEqual(int(uut.region_id), 4000)
 
-    def test_xls(self):
+    def test_student_xls(self):
         uut = STEMWizardAPI(configfile=configfile)
-        filename, df = uut.export_student_list()
+        filename, df = uut.export_list('student')
         self.assertGreater(len(filename), 30)
         self.assertTrue(os.path.exists(filename))
         self.assertGreaterEqual(df.shape[0], 3, 'fewer students than expected')
-        self.assertGreaterEqual(df.shape[1], 4, 'fewer columns than expected')
+        self.assertGreaterEqual(df.shape[1], 33, 'fewer columns than expected')
+
+    def test_judge_xls(self):
+        uut = STEMWizardAPI(configfile=configfile)
+        filename, df = uut.export_list('judge')
+        self.assertGreater(len(filename), 30)
+        self.assertTrue(os.path.exists(filename))
+        self.assertGreaterEqual(df.shape[0], 1, 'fewer judges than expected')
+        self.assertGreaterEqual(df.shape[1], 26, 'fewer columns than expected')
+
+    def test_volunteer_xls(self):
+        uut = STEMWizardAPI(configfile=configfile)
+        filename, df = uut.export_list('volunteer')
+        self.assertGreater(len(filename), 30)
+        self.assertTrue(os.path.exists(filename))
+        self.assertGreaterEqual(df.shape[0], 1, 'fewer volunteer than expected')
+        self.assertGreaterEqual(df.shape[1], 14, 'fewer columns than expected')
 
     def test_student_data(self):
         uut = STEMWizardAPI(configfile=configfile)
