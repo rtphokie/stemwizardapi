@@ -1,4 +1,6 @@
 **.log
+**.log.[0-9]**
+**.json
 **.html
 **.pyc
 **.xls

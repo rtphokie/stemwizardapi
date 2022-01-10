@@ -1,12 +1,53 @@
 import unittest
 from pprint import pprint
-from STEMWizard import STEMWizardAPI
+from STEMWizard import STEMWizardAPI, google_sync
+from STEMWizard.google_sync import NCSEFGoogleDrive
 import os
 
 configfile = 'stemwizardapi.yaml'
 
+class GoogleSyncTestCases(unittest.TestCase):
 
-class MyTestCase(unittest.TestCase):
+    def test_sheet(self):
+        sheet = google_sync.get_sheet('NCSEF 2022 student list')
+
+    def test_path(self):
+        uut = NCSEFGoogleDrive()
+        for id, data in uut.ids.items():
+            if data['labels']['trashed']:
+                continue
+            if len(data['parents']) == 0:
+                uut._buildpath(data, '')
+
+    def test_drive(self):
+        uut = NCSEFGoogleDrive()
+        print(uut)
+
+    def test_find_file(self):
+        uut = NCSEFGoogleDrive()
+        node = uut.get_id_by_path('/Automation/ncsef/by project')
+        # self.assertEqual('1a8mTh8qSxFmJ7vOf3rHUsNn62lzFjYPC', node['id'])
+
+    def test_create_folder(self):
+        uut = NCSEFGoogleDrive()
+        # uut.list_all(cache_update_ttl=0)
+        data={'ELE': ['BioS', 'Chem', 'EaEn', 'EnTe', 'PhyM'],
+              'JR': ['BSA', 'BSB', 'CHE', 'EES', 'ENG', 'MAT', 'PHY', 'TEC'],
+              'SR': ['BSA', 'BSB', 'CHE', 'EES', 'ENG', 'MAT', 'PHY', 'TEC']
+              }
+        uut.list_all(cache_update_ttl=0)
+        for fair in ['ncsef', 'ncsefreg1', 'ncsefreg3a', 'ncsefreg7']:
+            for orgmethod in ['by category', 'by internal id', 'by judge', 'by student name', 'by project']:
+                uut.create_folder(f'/Automation/{fair}/{orgmethod}')
+            for division in data.keys():
+                uut.create_folder(f'/Automation/{fair}/by category/{division}', refresh=False)
+                for category in data[division]:
+                    uut.create_folder(f'/Automation/{fair}/by category/{division}/{category}', refresh=False)
+
+        uut.list_all(cache_update_ttl=0)
+
+
+class STEMWizardAPITestCases(unittest.TestCase):
 
     def test_setcolumns(self):
         # results are not really testable in this context, so looking for exceptions here
