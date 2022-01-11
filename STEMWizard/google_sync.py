@@ -50,12 +50,18 @@ class NCSEFGoogleDrive(object):
     def __str__(self, root=None):
         indent = 0
         response = ""
-        for id, data in self.ids.items():
-            if data['labels']['trashed']:
+        for id, node in self.ids.items():
+            if node['labels']['trashed']:
                 continue
-            if len(data['parents']) == 0:
-                response += self._node_output(data)
+            elif root is not None:
+                if node['fullpath'] == root:
+                    response += self._node_output(node, root=root)
+            elif len(node['parents']) == 0:
+                response += self._node_output(node)
         return response
+
+    def dump(self, root):
+        return(self.__str__(root=root))
 
     def _auth(self):
         gauth = GoogleAuth()
@@ -64,27 +70,28 @@ class NCSEFGoogleDrive(object):
         drive = GoogleDrive(gauth)
         return drive
 
-    def _node_output(self, node, indent=0):
-        mt = ''
-        if 'folder' in node['mimeType']:
-            emoji = '📁'
-        elif 'zip' in node['mimeType'] or 'tar' in node['mimeType']:
-            emoji = '🗜️'
-        elif 'image' in node['mimeType']:
-            emoji = '🖼️'
-        elif 'pdf' in node['mimeType']:
-            emoji = '🅿️'
-        elif 'sheet' in node['mimeType']:
-            emoji = '🔢'
-        elif 'text' in node['mimeType']:
-            emoji = '📄'
-        else:
-            emoji = '📄'
-            mt = node['mimeType']
-        response = (f"{'.' * indent}{emoji}{node['fullpath']}\n")
-        for child in set(node['children']):
-            response += self._node_output(self.ids[child], indent=indent + 1)
-
+    def _node_output(self, node, indent=0, root=None):
+        response=''
+        if root is None or node['fullpath'].startswith(root):
+            mt = ''
+            if 'folder' in node['mimeType']:
+                emoji = '📁'
+            elif 'zip' in node['mimeType'] or 'tar' in node['mimeType']:
+                emoji = '🗜️'
+            elif 'image' in node['mimeType']:
+                emoji = '🖼️'
+            elif 'pdf' in node['mimeType']:
+                emoji = '🅿️'
+            elif 'sheet' in node['mimeType']:
+                emoji = '🔢'
+            elif 'text' in node['mimeType']:
+                emoji = '📄'
+            else:
+                emoji = '📄'
+                mt = node['mimeType']
+            response = (f"{'.' * indent}{emoji}{node['fullpath']}\n")
+            for child in set(node['children']):
+                response += self._node_output(self.ids[child], indent=indent + 1)
         return response
 
     def _buildpath(self, node, path):

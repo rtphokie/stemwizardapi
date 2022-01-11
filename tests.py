@@ -33,6 +33,10 @@ class GoogleDriveSyncTestCases(unittest.TestCase):
             seen[x]+=1
         self.assertEqual(len(lines), sum(seen.values())) # ensure each full path shows up just once in output
 
+    def test_drive_dump_specific_folder(self):
+        uut = NCSEFGoogleDrive()
+        print(uut.dump('/Automation/ncsefreg7/by category/SR'))
+
     def test_create_folder(self):
         uut = NCSEFGoogleDrive()
         # uut.list_all(cache_update_ttl=0)
@@ -50,10 +54,6 @@ class GoogleDriveSyncTestCases(unittest.TestCase):
                     uut.create_folder(f'/Automation/{fair}/by category/{division}/{category}', refresh=False)
 
         uut.list_all(cache_update_ttl=0)
-
-    def test_drive_dump_specific_folde(self):
-        uut = NCSEFGoogleDrive()
-        uut.dump('/Automation/ncsefreg7')
 
 
 class STEMWizardAPITestCases(unittest.TestCase):
