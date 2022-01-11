@@ -25,11 +25,6 @@ class GoogleDriveSyncTestCases(unittest.TestCase):
         uut = NCSEFGoogleDrive()
         print(uut)
 
-    def test_find_file(self):
-        uut = NCSEFGoogleDrive()
-        node = uut.get_id_by_path('/Automation/ncsef/by project')
-        # self.assertEqual('1a8mTh8qSxFmJ7vOf3rHUsNn62lzFjYPC', node['id'])
-
     def test_create_folder(self):
         uut = NCSEFGoogleDrive()
         # uut.list_all(cache_update_ttl=0)
