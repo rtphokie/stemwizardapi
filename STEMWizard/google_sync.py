@@ -16,6 +16,29 @@ logger = get_logger('google')
 
 class NCSEFGoogleDrive(object):
     FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
+    common_mime_types = {'pdf': 'application/pdf',
+                         'zip': 'application/zip',
+                         'avi': 'video/x-msvideo',
+                         'xls': 'application/vnd.ms-excel',
+                         'xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+                         'csv': 'text/csv',
+                         'gif': 'image/gif',
+                         'jpg': 'image/jpeg',
+                         'jpeg': 'image/jpeg',
+                         'png': 'image/png',
+                         'tif': 'image/tiff',
+                         'txt': 'text/plain',
+                         'tiff': 'image/tiff',
+                         'mp3': 'audio/mpeg',
+                         'wav': 'audio/wav',
+                         'mov': 'video/mov',
+                         'doc': 'application/msword',
+                         'docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+                         'rtf': 'application/rtf',
+                         'ppt': 'application/vnd.ms-powerpoint',
+                         'pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+
+                         }
 
     def __init__(self):
         self.drive = self._auth()
@@ -31,7 +54,7 @@ class NCSEFGoogleDrive(object):
             if data['labels']['trashed']:
                 continue
             if len(data['parents']) == 0:
-                response += self._fileinfo(data)
+                response += self._node_output(data)
         return response
 
     def _auth(self):
@@ -41,19 +64,7 @@ class NCSEFGoogleDrive(object):
         drive = GoogleDrive(gauth)
         return drive
 
-    def get_id_by_path(self, path):
-        dirs = path.split('/')
-        candidateids = []
-        for id, node in self.ids.items():
-            if len(node['parents']) == 0:
-                candidateids.append(id)
-        print(candidateids)
-        print(self.ids[candidateids[0]]['children'])
-
-        # for dir in dirs:
-        #     print(dir)
-
-    def _fileinfo(self, node, indent=0):
+    def _node_output(self, node, indent=0):
         mt = ''
         if 'folder' in node['mimeType']:
             emoji = '📁'
@@ -71,14 +82,14 @@ class NCSEFGoogleDrive(object):
             emoji = '📄'
             mt = node['mimeType']
         response = (f"{'.' * indent}{emoji}{node['fullpath']}\n")
-        for child in node['children']:
-            response += self._fileinfo(self.ids[child], indent=indent + 1)
+        for child in set(node['children']):
+            response += self._node_output(self.ids[child], indent=indent + 1)
 
         return response
 
     def _buildpath(self, node, path):
-        node['fullpath']=f"{path}/{node['title']}"
-        for child in node['children']:
+        node['fullpath'] = f"{path}/{node['title']}"
+        for child in set(node['children']):
             if child in self.ids.keys():
                 self._buildpath(self.ids[child], node['fullpath'])
             else:
@@ -109,9 +120,10 @@ class NCSEFGoogleDrive(object):
         checked_delta = utcnow - parser.isoparse(last_checked)
         updated_delta = utcnow - parser.isoparse(last_updated)
 
-        if checked_delta.total_seconds() > cache_checked_ttl or updated_delta.total_seconds() > cache_update_ttl:
+        if checked_delta.total_seconds() > cache_checked_ttl:  # or updated_delta.total_seconds() > cache_update_ttl:
+            logger.info(f'refetching file info, last checked {checked_delta.total_seconds() / 60:.1f} minutes ago')
             last_checked = utcnow.isoformat()
-            for file_list in self.drive.ListFile({'q': 'trashed=false', 'maxResults': 50}):
+            for file_list in self.drive.ListFile({'q': 'trashed=false', 'maxResults': 500}):
                 for fileinfo in file_list:
                     if fileinfo['mimeType'] == NCSEFGoogleDrive.FOLDER_MIME_TYPE:
                         pass
@@ -120,6 +132,8 @@ class NCSEFGoogleDrive(object):
                     cache_by_id[fileinfo['id']] = fileinfo
                     cache_by_id[fileinfo['id']]['children'] = []
                     cache_by_id[fileinfo['id']]['fullpath'] = ''
+        else:
+            logger.debug(f'using cached file info, last checked {checked_delta.total_seconds() / 60:.1f} minutes ago')
 
         for id, data in cache_by_id.items():
             if data['modifiedDate'] > last_updated:
@@ -140,18 +154,27 @@ class NCSEFGoogleDrive(object):
 
         self._write_cache()
 
-
-
-    def create_file(self, fullpath, mimeType='application/vnd.google-apps.file'):
-        found, found_folder, parentid, parentpath, title = self._find_file(fullpath)
+    def create_file(self, localpath, remotepath, mimeType='application/vnd.google-apps.file'):
+        found, found_folder, parentid, parentpath, title = self._find_file(remotepath)
         if not found:
+            if parentid is None:
+                parentitem = self.create_folder(parentpath)
+                parentid = parentitem['id']
+
+            for ext, mtype in NCSEFGoogleDrive.common_mime_types.items():
+                if localpath.endswith(f'.{ext}'):
+                    mimeType = mtype
             item = self.drive.CreateFile(
                 {"title": title, "parents": [{"id": parentid}],
-                 "mimeType": mimeTypeE}
+                 "mimeType": mimeType}
             )
+            item.SetContentFile(localpath)
             item.Upload()
+        else:
+            logger.error(f'{remotepath} already exists')
 
     def create_folder(self, fullpath, expectedroot='Automation', refresh=True):
+        item = {}
         found, found_folder, parentid, parentpath, title = self._find_file(fullpath)
         if found and found_folder:
             logger.warning(f"folder {fullpath} already exists")
@@ -166,11 +189,10 @@ class NCSEFGoogleDrive(object):
             )
             item.Upload()
 
-
-            #update local cache
-            item['fullpath']=fullpath
-            item['children']=[]
-            self.ids[item['id']]=item
+            # update local cache
+            item['fullpath'] = fullpath
+            item['children'] = []
+            self.ids[item['id']] = item
             self._write_cache()
 
             parentid = item['id']
@@ -178,6 +200,7 @@ class NCSEFGoogleDrive(object):
 
             if refresh:
                 self.list_all(cache_update_ttl=0)
+        return item
 
     def _find_file(self, fullpath):
         found = False

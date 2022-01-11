@@ -6,20 +6,22 @@ import os
 
 configfile = 'stemwizardapi.yaml'
 
-class GoogleSyncTestCases(unittest.TestCase):
+
+class GoogleSheetsSyncTestCases(unittest.TestCase):
 
     def test_sheet(self):
         sheet = google_sync.get_sheet('NCSEF 2022 student list')
 
-    def test_path(self):
-        uut = NCSEFGoogleDrive()
-        for id, data in uut.ids.items():
-            if data['labels']['trashed']:
-                continue
-            if len(data['parents']) == 0:
-                uut._buildpath(data, '')
 
-    def test_drive(self):
+class GoogleDriveSyncTestCases(unittest.TestCase):
+
+    def test_createfile(self):
+        uut = NCSEFGoogleDrive()
+        localpath = 'files/53240/ISEF_1/ISEF_1.pdf'
+        remotepath = '/Automation/ncregtest/ISEF_1.pdf'
+        uut.create_file(localpath, remotepath)
+
+    def test_drive_dump(self):
         uut = NCSEFGoogleDrive()
         print(uut)
 
@@ -31,10 +33,10 @@ class GoogleSyncTestCases(unittest.TestCase):
     def test_create_folder(self):
         uut = NCSEFGoogleDrive()
         # uut.list_all(cache_update_ttl=0)
-        data={'ELE': ['BioS', 'Chem', 'EaEn', 'EnTe', 'PhyM'],
-              'JR': ['BSA', 'BSB', 'CHE', 'EES', 'ENG', 'MAT', 'PHY', 'TEC'],
-              'SR': ['BSA', 'BSB', 'CHE', 'EES', 'ENG', 'MAT', 'PHY', 'TEC']
-              }
+        data = {'ELE': ['BioS', 'Chem', 'EaEn', 'EnTe', 'PhyM'],
+                'JR': ['BSA', 'BSB', 'CHE', 'EES', 'ENG', 'MAT', 'PHY', 'TEC'],
+                'SR': ['BSA', 'BSB', 'CHE', 'EES', 'ENG', 'MAT', 'PHY', 'TEC']
+                }
         uut.list_all(cache_update_ttl=0)
         for fair in ['ncsef', 'ncsefreg1', 'ncsefreg3a', 'ncsefreg7']:
             for orgmethod in ['by category', 'by internal id', 'by judge', 'by student name', 'by project']:
@@ -45,6 +47,10 @@ class GoogleSyncTestCases(unittest.TestCase):
                     uut.create_folder(f'/Automation/{fair}/by category/{division}/{category}', refresh=False)
 
         uut.list_all(cache_update_ttl=0)
+
+    def test_drive_dump_specific_folde(self):
+        uut = NCSEFGoogleDrive()
+        uut.dump('/Automation/ncsefreg7')
 
 
 class STEMWizardAPITestCases(unittest.TestCase):
