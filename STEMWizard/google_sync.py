@@ -47,7 +47,7 @@ class NCSEFGoogleDrive(object):
         self.last_checked = None
         self.list_all()
 
-    def __str__(self):
+    def __str__(self, root=None):
         indent = 0
         response = ""
         for id, data in self.ids.items():

@@ -23,7 +23,15 @@ class GoogleDriveSyncTestCases(unittest.TestCase):
 
     def test_drive_dump(self):
         uut = NCSEFGoogleDrive()
-        print(uut)
+        str = uut.__str__()
+        lines=str.split("\n")
+        self.assertGreaterEqual(len(lines),125)
+        seen={}
+        for x in lines:
+            if x not in seen.keys():
+                seen[x] =0
+            seen[x]+=1
+        self.assertEqual(len(lines), sum(seen.values())) # ensure each full path shows up just once in output
 
     def test_create_folder(self):
         uut = NCSEFGoogleDrive()
