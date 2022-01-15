@@ -6,39 +6,16 @@ import olefile
 import os
 import yaml
 from STEMWizard.logstuff import get_logger
+import json
 import random
 import string
+from STEMWizard.google_sync import NCSEFGoogleDrive
+
 from requests_toolbelt import MultipartEncoder
 
 pd.set_option('display.max_columns', None)
 headers = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36'}
-
-
-def WebKit_format(data, headers=None):
-    boundary = '----WebKitFormBoundary' + ''.join(random.sample(string.ascii_letters + string.digits, 16))
-    # Extract Boundary information from Headers
-    if headers is None:
-        headers = {}
-    if "content-type" in headers:
-        fd_val = str(headers["content-type"])
-        if "boundary" in fd_val:
-            fd_val = fd_val.split(";")[1].strip()
-            boundary = fd_val.split("=")[1].strip()
-        else:
-            raise Exception(
-                "Multipart / form-data header information error, please check if the content-type key contains Boundary")
-    #  Form-data format
-    jion_str = '--{}\r\nContent-Disposition: form-data; name="{}"\r\n\r\n{}\r\n'
-    end_str = "--{}--".format(boundary)
-    args_str = ""
-    if not isinstance(data, dict):
-        raise Exception("Multipart / form-data parameter error, DATA parameter should be DICT type")
-    for key, value in data.items():
-        args_str = args_str + jion_str.format(boundary, key, value)
-    args_str = args_str + end_str.format(boundary)
-    args_str = args_str.replace("\'", "\"")
-    return args_str
 
 
 class STEMWizardAPI(object):
@@ -56,6 +33,7 @@ class STEMWizardAPI(object):
         self.csrf = None
         self.username = None
         self.password = None
+        self.googleapi = NCSEFGoogleDrive()
 
         self._read_config(configfile)
         self.logger = get_logger(self.domain)
@@ -150,6 +128,12 @@ class STEMWizardAPI(object):
         return authenticated
 
     def export_list(self, listname, purge_file=False):
+        '''
+        Google prefers all excel files to have an xlsx extension
+        :param listname: student, judge, or volunteer
+        :param purge_file: delete local file when done, default: false
+        :return:
+        '''
         if self.token is None:
             raise ValueError('no token found in object, login before calling export_student_list')
         self.set_columns(listname)
@@ -160,6 +144,7 @@ class STEMWizardAPI(object):
                    'searchhere1': ''
                    }
         if listname == 'student':
+            remotepath = f'/Automation/{self.domain}/by student/student list.xlsx'
             url = f'{self.url_base}/fairadmin/export_file'
             payload_specific = {
                 'category_select1': '',
@@ -182,6 +167,7 @@ class STEMWizardAPI(object):
                 'last_year': '',
             }
         elif listname == 'judge':
+            remotepath = f'/Automation/{self.domain}/by judge/judge list.xlsx'
             url = f'{self.url_base}/fairadmin/export_file_judge'
             payload_specific = {
                 'category_select1': '',
@@ -201,6 +187,7 @@ class STEMWizardAPI(object):
                 'dashBoardPage1': '',
             }
         elif listname == 'volunteer':
+            remotepath = f'/Automation/{self.domain}/volunteer list.xlsx'
             url = f'{self.url_base}/fairadmin/exportVolunteerExcelPdf'
             payload_specific = {
                 'searchhere1': '',
@@ -214,25 +201,27 @@ class STEMWizardAPI(object):
 
         self.logger.debug(f'posting to {url} using {listname} params')
         rf = self.session.post(url, data=payload, headers=headers, stream=True)
-        local_filename = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
+        filename_suggested = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
+        self.logger.info(f'receiving {filename_suggested}')
+        filename_local = f'files/{self.domain}/{listname}_list.xls'
 
-        fp = open(local_filename, 'wb')
+        fp = open(filename_local, 'wb')
         for chunk in rf.iter_content(chunk_size=1024):
             if chunk:  # filter out keep-alive new chunks
                 fp.write(chunk)
         fp.flush()
         fp.close()
 
-        ole = olefile.OleFileIO(local_filename)
+        ole = olefile.OleFileIO(filename_local)
         df = pd.read_excel(ole.openstream('Workbook'), engine='xlrd')
 
+        self.googleapi.create_file(filename_local, remotepath)
         if purge_file:
             try:
-                os.remove(local_filename)
+                os.remove(filename_local)
             except OSError as e:
-                print(f'failed to remove {local_filename} {e}')
-
-        return (local_filename, df)
+                print(f'failed to remove {filename_local} {e}')
+        return (filename_local, df)
 
     def set_columns(self, listname='judge'):
         '''
@@ -357,7 +346,16 @@ class STEMWizardAPI(object):
                 self.csrf = csrf.get('content')
             self.logger.debug(f"gathered CSRF token {self.csrf}")
 
-    def student_status(self, debug=True, fileinfo=False, download=True):
+    def student_status(self, debug=True, fileinfo=False, download=True, force_file_detail_fetch=False):
+        cache_filename='student_data_cache.json'
+        try:
+            fp = open(cache_filename, 'r')
+            cache = json.loads(fp.read())
+            fp.close()
+        except Exception as e:
+            print(e)
+
+
         self.logger.debug(f"in student_status, fileinfo {fileinfo}, download {download}")
         payload = {'_token': self.token,
                    'page': 1,
@@ -434,14 +432,26 @@ class STEMWizardAPI(object):
                     param = param.replace(f"click_class", '').replace(f'_{studentid}', '')
                     data[studentid][param] = value
             if fileinfo:
-                self.logger.debug(
-                    f"making AJAX call for finfo for {studentid} {data[studentid]['f_name']} {data[studentid]['l_name']}")
-                data[studentid]['files'] = self.student_file_detail(studentid, data[studentid]['student_info_id'],
-                                                                    download=download)
+                pprint(data[studentid])
+                if data[studentid]['stud_com_status'] != 'Complete' or force_file_detail_fetch:
+                    self.logger.debug(f"making AJAX call for finfo for {studentid} {data[studentid]['f_name']} {data[studentid]['l_name']}")
+                    data[studentid]['files'] = self.student_file_detail(studentid, data[studentid]['student_info_id'])
+                for file in  data[studentid]['files']:
+                    pprint(file)
+                    return
+                # if download and data[filetype]['file_status'] in ['SUBMITTED', 'APPROVED']:
+                #     self.logger.info(f"downloading {studentId} {data[filetype]['file_name']}")
+                #     self.DownloadFile(data[filetype]['file_url'], f"{studentId}/{filetype.replace(' ', '_')}",
+                #                       data[filetype]['file_name'])
         self.logger.info(f'got {len(data)} rows from {url}')
+
+        fp = open(cache_filename, 'w')
+        json.dump(cache, fp, indent=2)
+        fp.close()
+
         return data
 
-    def student_file_detail(self, studentId, info_id, download=True):
+    def student_file_detail(self, studentId, info_id):
         self.logger.debug(f"getting file details for {studentId}")
         self.get_csrf_token()
         url = f'{self.url_base}/filesAndForms/studentFormsAndFilesDetailedView'
@@ -488,10 +498,7 @@ class STEMWizardAPI(object):
                     value = cell.text.strip()
                 if value is not None:
                     data[filetype][params[n]] = value
-            if download and data[filetype]['file_status'] in ['SUBMITTED', 'APPROVED']:
-                self.logger.info(f"downloading {studentId} {data[filetype]['file_name']}")
-                self.DownloadFile(data[filetype]['file_url'], f"{studentId}/{filetype.replace(' ', '_')}",
-                                  data[filetype]['file_name'])
+
         return data
 
     def DownloadFile(self, url, local_dir, local_filename, parent_dir='files'):
@@ -515,20 +522,20 @@ class STEMWizardAPI(object):
         f.close()
         return local_filename
 
-
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='synchronize with STEM Wizard')
-    parser.add_argument('--files', help='fetch files and forms', action='store_true')
-    parser.add_argument('--student', help='gather student data', action='store_true')
-    parser.add_argument('--judge', help='gather judge data', action='store_true')
-    parser.add_argument('--volunteer', help='gather volunteer data', action='store_true')
-
-    parser.add_argument('--sum', dest='accumulate', action='store_const',
-                        const=sum, default=max,
-                        help='sum the integers (default: find the max)')
-
-    args = parser.parse_args()
-    if args.judge:
-        raise ValueError("judge automation not implemented")
-    if args.volunteer:
-        raise ValueError("volunteer automation not implemented")
+#
+# if __name__ == '__main__':
+#     parser = argparse.ArgumentParser(description='synchronize with STEM Wizard')
+#     parser.add_argument('--files', help='fetch files and forms', action='store_true')
+#     parser.add_argument('--student', help='gather student data', action='store_true')
+#     parser.add_argument('--judge', help='gather judge data', action='store_true')
+#     parser.add_argument('--volunteer', help='gather volunteer data', action='store_true')
+#
+#     parser.add_argument('--sum', dest='accumulate', action='store_const',
+#                         const=sum, default=max,
+#                         help='sum the integers (default: find the max)')
+#
+#     args = parser.parse_args()
+#     if args.judge:
+#         raise ValueError("judge automation not implemented")
+#     if args.volunteer:
+#         raise ValueError("volunteer automation not implemented")

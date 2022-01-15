@@ -47,7 +47,7 @@ class NCSEFGoogleDrive(object):
         self.last_checked = None
         self.list_all()
 
-    def __str__(self, root=None):
+    def __str__(self, indent_character=' ', show_emoji=True, root=None):
         indent = 0
         response = ""
         for id, node in self.ids.items():
@@ -55,13 +55,14 @@ class NCSEFGoogleDrive(object):
                 continue
             elif root is not None:
                 if node['fullpath'] == root:
-                    response += self._node_output(node, root=root)
+                    response += self._node_output(node, root=root, indent_character=indent_character,
+                                                  show_emoji=show_emoji)
             elif len(node['parents']) == 0:
                 response += self._node_output(node)
         return response
 
-    def dump(self, root):
-        return(self.__str__(root=root))
+    def dump(self, root, indent_character=' ', show_emoji=True, ):
+        return (self.__str__(root=root, indent_character=indent_character, show_emoji=show_emoji))
 
     def _auth(self):
         gauth = GoogleAuth()
@@ -70,28 +71,28 @@ class NCSEFGoogleDrive(object):
         drive = GoogleDrive(gauth)
         return drive
 
-    def _node_output(self, node, indent=0, root=None):
-        response=''
+    def _node_output(self, node, indent=0, indent_character=" ", show_emoji=True, root=None):
+        response = ''
         if root is None or node['fullpath'].startswith(root):
             mt = ''
-            if 'folder' in node['mimeType']:
-                emoji = '📁'
-            elif 'zip' in node['mimeType'] or 'tar' in node['mimeType']:
-                emoji = '🗜️'
-            elif 'image' in node['mimeType']:
-                emoji = '🖼️'
-            elif 'pdf' in node['mimeType']:
-                emoji = '🅿️'
-            elif 'sheet' in node['mimeType']:
-                emoji = '🔢'
-            elif 'text' in node['mimeType']:
-                emoji = '📄'
-            else:
-                emoji = '📄'
-                mt = node['mimeType']
-            response = (f"{'.' * indent}{emoji}{node['fullpath']}\n")
+            if show_emoji:
+                if 'folder' in node['mimeType']:
+                    emoji = '📁'
+                elif 'zip' in node['mimeType'] or 'tar' in node['mimeType']:
+                    emoji = '🗜️'
+                elif 'image' in node['mimeType']:
+                    emoji = '🖼️'
+                elif 'pdf' in node['mimeType']:
+                    emoji = '🅿️'
+                elif 'sheet' in node['mimeType']:
+                    emoji = '🔢'
+                elif 'text' in node['mimeType']:
+                    emoji = '📄'
+                else:
+                    emoji = '📄'
+            response = (f"{indent_character * indent}{emoji}{node['fullpath']}\n")
             for child in set(node['children']):
-                response += self._node_output(self.ids[child], indent=indent + 1)
+                response += self._node_output(self.ids[child], indent=indent + 1, indent_character=indent_character)
         return response
 
     def _buildpath(self, node, path):
@@ -155,16 +156,29 @@ class NCSEFGoogleDrive(object):
         self.last_updated = last_updated
         self.last_checked = last_checked
 
+        # add full path to all nodes, de-dupe children
         for id, data in cache_by_id.items():
             if len(data['parents']) == 0:
                 self._buildpath(data, '')
+            data['children'] = list(set(data['children']))
 
         self._write_cache()
 
     def create_file(self, localpath, remotepath, mimeType='application/vnd.google-apps.file'):
-        found, found_folder, parentid, parentpath, title = self._find_file(remotepath)
-        if not found:
+        found_node = False
+        for id, node in self.ids.items():
+            if node['fullpath'] == remotepath:
+                found_node = id
+        found_parent_id, found_parent_folder, parentid, parentpath, title = self._find_file(remotepath)
+        if found_node:
+            print(parentpath, parentid)
+            item = self.drive.CreateFile({'id': found_node})
+            item.SetContentFile(localpath)
+            item.Upload()
+            logger.info(f'updated {remotepath} {found_node} from {localpath}')
+        elif not found_parent_id:
             if parentid is None:
+                logger.debug(f'creating {parentpath}')
                 parentitem = self.create_folder(parentpath)
                 parentid = parentitem['id']
 
@@ -177,6 +191,7 @@ class NCSEFGoogleDrive(object):
             )
             item.SetContentFile(localpath)
             item.Upload()
+            logger.info(f'created {remotepath}')
         else:
             logger.error(f'{remotepath} already exists')
 
