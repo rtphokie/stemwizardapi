@@ -16,13 +16,7 @@ class GoogleSheetsSyncTestCases(unittest.TestCase):
 
 class GoogleDriveSyncTestCases(unittest.TestCase):
 
-    # def test_createfile(self):
-    #     uut = NCSEFGoogleDrive()
-    #     localpath = 'files/53240/ISEF_1/ISEF_1.pdf'
-    #     remotepath = '/Automation/ncregtest/ISEF_1.pdf'
-    #     uut.create_file(localpath, remotepath)
-
-    def test_updatefile(self):
+    def destructive_test_updatefile(self):
         uut = NCSEFGoogleDrive()
         localpath = 'files/ncsef/judge_list.xls'
         remotepath = '/Automation/ncsef/by judge/judge list.xls'
@@ -92,6 +86,7 @@ class NCRegTestTestCases(unittest.TestCase):
     def test_student_xls(self):
         uut = STEMWizardAPI(configfile=configfile)
         filename, df = uut.export_list('student')
+        print(filename)
         self.assertGreater(len(filename), 30)
         self.assertTrue(os.path.exists(filename))
         self.assertGreaterEqual(df.shape[0], 3, 'fewer students than expected')
@@ -170,7 +165,7 @@ class NCSEF_prod_TestCases(unittest.TestCase):
     def test_student_xls(self):
         uut = STEMWizardAPI(configfile=configfile_prod)
         filename, df = uut.export_list('student')
-        self.assertGreater(len(filename), 30)
+        self.assertGreater(len(filename), 27)
         self.assertTrue(os.path.exists(filename))
         self.assertGreaterEqual(df.shape[0], 3, 'fewer students than expected')
         self.assertGreaterEqual(df.shape[1], 33, 'fewer columns than expected')
@@ -181,13 +176,13 @@ class NCSEF_prod_TestCases(unittest.TestCase):
         # print(df)
         self.assertGreater(len(filename), 20)
         self.assertTrue(os.path.exists(filename))
-        self.assertGreaterEqual(df.shape[0], 1, 'fewer judges than expected')
+        self.assertGreaterEqual(df.shape[0], 50, 'fewer judges than expected')
         self.assertGreaterEqual(df.shape[1], 26, 'fewer columns than expected')
 
     def test_volunteer_xls(self):
         uut = STEMWizardAPI(configfile=configfile_prod)
         filename, df = uut.export_list('volunteer')
-        self.assertGreater(len(filename), 30)
+        self.assertGreater(len(filename), 29)
         self.assertTrue(os.path.exists(filename))
         self.assertGreaterEqual(df.shape[0], 1, 'fewer volunteer than expected')
         self.assertGreaterEqual(df.shape[1], 14, 'fewer columns than expected')
@@ -196,20 +191,29 @@ class NCSEF_prod_TestCases(unittest.TestCase):
         uut = STEMWizardAPI(configfile=configfile_prod)
 
         data = uut.student_status(fileinfo=True, download=True)
-        pprint(data)
-        return
-        for id, node in data.items():
-            uut.googleapi.create_folder(f"/Automation/{uut.domain}/by internal id/{id}")
-            for formname, formdata in node['files'].items():
-                uut.googleapi.create_folder(f"/Automation/{uut.domain}/by internal id/{id}/{formname}")
-                # print(formname, formdata['file_name'])
-                localpath = f"files/{id}/{formname}/{formdata['file_name']}"
-                remotepath = f"/Automation/{uut.domain}/by internal id/{id}/{formname}/{formdata['file_name']}"
-                uut.googleapi.create_file(localpath, remotepath)
-
-            # uut.googleapi.create_file()
+        # for id, node in data.items():
+        #     print(id)
+        #     continue
+        #     uut.googleapi.create_folder(f"/Automation/{uut.domain}/by internal id/{id}")
+        #     for formname, formdata in node['files'].items():
+        #         uut.googleapi.create_folder(f"/Automation/{uut.domain}/by internal id/{id}/{formname}")
+        #         # print(formname, formdata['file_name'])
+        #         localpath = f"files/{id}/{formname}/{formdata['file_name']}"
+        #         remotepath = f"/Automation/{uut.domain}/by internal id/{id}/{formname}/{formdata['file_name']}"
+        #         uut.googleapi.create_file(localpath, remotepath)
+        #
+        #     # uut.googleapi.create_file()
         self.assertGreaterEqual(len(data), 3)
-        self.assertGreaterEqual(len(data[list(data.keys())[0]]['files']), 5)
+        laststudentid=list(data.keys())[-1]
+        pprint(data[laststudentid])
+        self.assertGreaterEqual(len(data[laststudentid]['files']), 6)
+
+    def test_filedownload_from_stemwizard(self):
+        #<a style="cursor: pointer;text-decoration:none;" class="file_download" id="file_download"
+        # original_file="Rose Research Plan.docx" uploaded_file_name="Rose Research Plan_63561_164230152536.docx">Rose Research Plan.docx</a>
+        url='https://ncsef.stemwizard.com/fairadmin/fileDownload'
+        uut = STEMWizardAPI(configfile=configfile_prod)
+        fn = uut.DownloadFileFromSTEMWizard('Rose Research Plan.doc','Rose Research Plan_63561_164230152536.docx')
 
 
 if __name__ == '__main__':

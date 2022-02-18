@@ -9,3 +9,4 @@ files/
 old/
 *.yaml
 venv/
+/foo.txt
