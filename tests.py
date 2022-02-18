@@ -208,6 +208,13 @@ class NCSEF_prod_TestCases(unittest.TestCase):
         pprint(data[laststudentid])
         self.assertGreaterEqual(len(data[laststudentid]['files']), 6)
 
+    def test_sync_to_google_drive(self):
+        uut = STEMWizardAPI(configfile=configfile_prod)
+
+        cache_filename = 'student_data_cache.json'
+        cache = uut._read_cache(cache_filename, 600)
+        pprint(cache)
+
     def test_filedownload_from_stemwizard(self):
         #<a style="cursor: pointer;text-decoration:none;" class="file_download" id="file_download"
         # original_file="Rose Research Plan.docx" uploaded_file_name="Rose Research Plan_63561_164230152536.docx">Rose Research Plan.docx</a>

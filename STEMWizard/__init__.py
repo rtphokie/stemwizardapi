@@ -4,13 +4,14 @@ import json
 import olefile
 import os
 import pandas as pd
-import requests
+import requests, requests_cache
 import time
 import yaml
 from STEMWizard.google_sync import NCSEFGoogleDrive
 from STEMWizard.logstuff import get_logger
 import os
 from tqdm import tqdm
+from datetime import timedelta
 
 # from requests_toolbelt import MultipartEncoder
 
@@ -28,8 +29,17 @@ class STEMWizardAPI(object):
         :param configfile: configfile: (default to stemwizardapi.yaml)
         '''
         self.authenticated = None
-        self.session = requests.Session()  # shared session, maintains cookies throughout
+        # self.session = requests.Session()  # shared session, maintains cookies throughout
+        self.session = requests_cache.CachedSession('STEMWizardAPI_http_cache',
+            # cache_control=True,  # Use Cache-Control headers for expiration, if available
+            expire_after=timedelta(minutes=30),  # Otherwise expire responses after one day
+            allowable_methods=['POST'],
+            allowable_codes=[200],  # Cache 400 responses as a solemn reminder of your failures
+            # match_headers=True,  # Match all request headers
+            stale_if_error=True
+        )
         self.region_domain = 'unknown'
+        self.parent_file_dir = 'files'
         self.region_id = None
         self.csrf = None
         self.username = None
@@ -76,6 +86,9 @@ class STEMWizardAPI(object):
         '''
         url = f'{self.url_base}/admin/login'
         r = self.session.get(url, headers=headers, allow_redirects=True)
+        if r.status_code >= 300:
+            self.logger.error(f"status code {r.status_code} on post to {url}")
+            return
 
         # scrape token
         soup = BeautifulSoup(r.text, 'html.parser')
@@ -118,6 +131,10 @@ class STEMWizardAPI(object):
 
         rp = self.session.post(url_login, data=payload, headers=headers,
                                allow_redirects=True)  # , cookies=session_cookies)
+        if rp.status_code >= 300:
+            self.logger.error(f"status code {rp.status_code} on post to {url}")
+            return
+
         # self.token = token
         # self.region_id = payload['region_id']
         authenticated = rp.status_code == 200
@@ -202,9 +219,12 @@ class STEMWizardAPI(object):
 
         self.logger.debug(f'posting to {url} using {listname} params')
         rf = self.session.post(url, data=payload, headers=headers, stream=True)
+        if rf.status_code >= 300:
+            self.logger.error(f"status code {rf.status_code} on post to {url}")
+            return
         filename_suggested = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
         self.logger.info(f'receiving {filename_suggested}')
-        filename_local = f'files/{self.domain}/{listname}_list.xls'
+        filename_local = f'{self.parent_file_dir}/{self.domain}/{listname}_list.xls'
 
         fp = open(filename_local, 'wb')
         for chunk in rf.iter_content(chunk_size=1024):
@@ -341,30 +361,18 @@ class STEMWizardAPI(object):
         else:
             url = f'{self.url_base}/filesAndForms'
             r = self.session.get(url, headers=headers)
+            if r.status_code >= 300:
+                self.logger.error(f"status code {r.status_code} on post to {url}")
+                return
             soup = BeautifulSoup(r.text, 'lxml')
             csrf = soup.find('meta', {'name': 'csrf-token'})
             if csrf is not None:
                 self.csrf = csrf.get('content')
             self.logger.debug(f"gathered CSRF token {self.csrf}")
 
-    def student_status(self, debug=True, fileinfo=False, download=True, force_file_detail_fetch=False,
-                       max_cache_age=600):
+    def student_status(self, debug=True, fileinfo=False, download=True, force_file_detail_fetch=False):
         cache_filename = 'student_data_cache.json'
-        try:
-            if os.path.isfile(cache_filename):
-                st = os.stat(cache_filename)
-                age = (time.time() - st.st_mtime)
-            else:
-                age = 999999999999999
-            if age < max_cache_age:
-                fp = open(cache_filename, 'r')
-                cache = json.loads(fp.read())
-                fp.close()
-            else:
-                cache = {}
-        except Exception as e:
-            print(e)
-            cache = {}
+        cache = self._read_cache(cache_filename, 600)
 
         self.logger.debug(f"in student_status, fileinfo {fileinfo}, download {download}")
         payload = {'_token': self.token,
@@ -398,13 +406,16 @@ class STEMWizardAPI(object):
         self.get_csrf_token()
 
         url = f'{self.url_base}/filesAndForms/getStudentData'
-        r = self.session.post(url, data=payload, headers=headers,
-                              stream=True)
+        r = self.session.post(url, data=payload, headers=headers, stream=True)
+        if r.status_code >= 300:
+            self.logger.error(f"status code {r.status_code} on post to {url}")
+            return
 
         soup = BeautifulSoup(r.text, 'lxml')
         body = soup.find('tbody')
         rows = body.find_all('tr')
         data = {}
+        self.logger.info(f"got StudentData for {int(len(rows)/2)} students")
         for cnt, row in enumerate(rows):
             studentid = row.get('id')
             if studentid is None or 'updatedStudentDiv_' not in studentid:
@@ -423,22 +434,54 @@ class STEMWizardAPI(object):
                                'admin_status': None,
                                'stud_com_status': None,
                                'stud_approval_status': None,
-                               'files': []}
+                               'files': {}}
             for cell in cells:
                 self.process_student_data_row(cell, data, studentid)
-            print(f"{100 * ((cnt + 1) / len(rows)):3.0f}% {studentid} {data[studentid]['f_name'][:10]:10}", end=" ")
-            print(f"{data[studentid]['l_name'][:10]:10}", end=" ")
-            print(f"{data[studentid]['origin_fair'][:20]:10}", end=" ")
-            print()
-            # {data[studentid]['l_name'][:10]:10} {data[studentid]['origin_fair']}")
+            if data[studentid]['f_name'] == 'Judy' and data[studentid]['l_name'] == 'Test':
+                continue
+            jkl = f"{self.parent_file_dir}/{self.region_domain}/{studentid}/{data[studentid]['l_name']}_{data[studentid]['f_name']}.json"
+
+
             if fileinfo:
                 self.sync_student_files_from_stem_wizard(studentid, data[studentid], download, force_file_detail_fetch)
+            else:
+                # get file details from individual cache if skipping the expensive ajax call
+                if os.path.isfile(jkl):
+                    data[studentid] = json.load(jkl)
+            cache[studentid]=data[studentid]
+            print(f"{100 * ((cnt + 1) / len(rows)):3.0f}% {studentid} {data[studentid]['f_name'][:10]:10}", end=" ")
+            print(f"{data[studentid]['l_name'][:10]:10}", end=" ")
+            print(f"{data[studentid]['stud_approval_status'][:10]:10}", end=" ")
+            print(f"{data[studentid]['origin_fair'][:20]:10}", end=" ")
+            print()
+            self._write_to_cache(data[studentid], jkl)
 
+        self._write_to_cache(cache, cache_filename)
+
+        return data
+
+    def _write_to_cache(self, cache, cache_filename):
         fp = open(cache_filename, 'w')
         json.dump(cache, fp, indent=2)
         fp.close()
 
-        return data
+    def _read_cache(self, cache_filename, max_cache_age=600):
+        try:
+            if os.path.isfile(cache_filename):
+                st = os.stat(cache_filename)
+                age = (time.time() - st.st_mtime)
+            else:
+                age = 999999999999999
+            if age < max_cache_age:
+                fp = open(cache_filename, 'r')
+                cache = json.loads(fp.read())
+                fp.close()
+            else:
+                cache = {}
+        except Exception as e:
+            print(e)
+            cache = {}
+        return cache
 
     def process_student_data_row(self, cell, data, studentid):
         id = cell.get('id')
@@ -459,30 +502,34 @@ class STEMWizardAPI(object):
             param = param.replace(f"click_class", '').replace(f'_{studentid}', '')
             data[studentid][param] = value
 
-    def sync_student_files_to_google_drive(self, data, studentid):
-        pass
-
+    def sync_student_files_to_google_drive(self, node, studentid):
+        for formname, formdata in node['files'].items():
+            self.googleapi.create_folder(f"/Automation/{self.domain}/by internal id/{studentid}/{formname}")
+            # print(formname, formdata['file_name'])
+            localpath = f"files/{studentid}/{formname}/{formdata['file_name']}"
+            remotepath = f"/Automation/{self.domain}/by internal id/{id}/{formname}/{formdata['file_name']}"
+            self.googleapi.create_file(localpath, remotepath)
     def sync_student_files_from_stem_wizard(self, studentid, studentdata, download, force_file_detail_fetch):
         if studentdata['stud_com_status'] != 'Complete' or force_file_detail_fetch:
-            self.logger.debug(
-                f"making AJAX call for finfo for {studentid} {studentdata['f_name']} {studentdata['l_name']}")
+            self.logger.debug(f"making AJAX call for finfo for {studentid} {studentdata['f_name']} {studentdata['l_name']}")
             studentdata['files'] = self.student_file_detail(studentid, studentdata['student_info_id'])
-        for filetype, filedata in studentdata['files'].items():
-            if download and filedata['file_status'] in ['SUBMITTED', 'APPROVED']:
-                self.logger.info(f"downloading {studentid} {filedata['file_name']}")
-                pprint(filedata)
-                if 'https' not in filedata['file_url'] and filedata['uploaded_file_name'] is not None:
-                    fn = self.DownloadFileFromSTEMWizard('Rose Research Plan.doc',
-                                                   'Rose Research Plan_63561_164230152536.docx')
-                if 'https' in filedata['file_url']:
-                    fn = self.DownloadFileFromS3Bucket(filedata['file_url'],
-                                                       f"{studentid}/{filetype.replace(' ', '_')}",
-                                                       filedata['file_name'])
-                else:
-                    pprint(filedata)
-                    self.logger.error(f"error downloading")
 
-    def student_file_detail(self, studentId, info_id):
+            for documenttype, filedata in studentdata['files'].items():
+                if download and filedata['file_status'] in ['SUBMITTED', 'APPROVED']:
+                    if 'https' not in filedata['file_name'] and filedata['uploaded_file_name'] is not None:
+                        # pprint(filedata)
+                        fn = self.DownloadFileFromSTEMWizard(filedata['file_name'],
+                                                             filedata['uploaded_file_name'],
+                                                             f"{studentid}/{documenttype.replace(' ', '_')}" )
+                    elif 'https' in filedata['file_url']:
+                                                             fn = self.DownloadFileFromS3Bucket(filedata['file_url'],
+                                                             f"{studentid}/{documenttype.replace(' ', '_')}",
+                                                             filedata['file_name'])
+                    else:
+                        pprint(filedata)
+                        self.logger.error(f"could not determine download for student {studentid} {documenttype}")
+
+    def student_file_detail(self, studentId, info_id, ):
         self.logger.debug(f"getting file details for {studentId}")
         self.get_csrf_token()
         url = f'{self.url_base}/filesAndForms/studentFormsAndFilesDetailedView'
@@ -492,6 +539,9 @@ class STEMWizardAPI(object):
         headers['Referer'] = f'{self.url_base}/filesAndForms'
         headers['X-Requested-With'] = 'XMLHttpRequest'
         rfaf = self.session.post(url, data=payload, headers=headers)
+        if rfaf.status_code >= 300:
+            self.logger.error(f"status code {rfaf.status_code} on post to {url}")
+            return
         fp = open('foo.html', 'w')
         fp.write(rfaf.text)
         fp.close()
@@ -536,39 +586,37 @@ class STEMWizardAPI(object):
 
         return data
 
-    def DownloadFileFromS3Bucket(self, url, local_dir, local_filename, parent_dir=f'files'):
-        '''
-
-        :param url:
-        :param local_dir:
-        :param local_filename:
-        :param parent_dir:
-        :return:
-        '''
+    def download_to_local_file_path(self, local_dir, local_filename, parent_dir, r, force_download=False):
         target_dir = f"{parent_dir}/{self.region_domain}/{local_dir}"
         full_pathname = f"{target_dir}/{local_filename}"
-        self.logger.debug(f"downloading {url} to {full_pathname}")
-        os.makedirs(target_dir, exist_ok=True)
+        if not os.path.isfile(full_pathname):
+            os.makedirs(target_dir, exist_ok=True)
+            if r.status_code >= 300:
+                raise Exception(f'{r.status_code}')
+            f = open(full_pathname, 'wb')
+            for chunk in r.iter_content(chunk_size=512 * 1024):
+                if chunk:  # filter out keep-alive new chunks
+                    f.write(chunk)
+            f.close()
+            self.logger.info(f"downloaded to {full_pathname} forced {force_download}")
+        else:
+            self.logger.debug(f"using existing {full_pathname}")
+
+    def DownloadFileFromS3Bucket(self, url, local_dir, local_filename, parent_dir=f'files'):
+        self.logger.debug(f"downloading {url} to {local_dir} as {local_filename} from S3")
         r = self.session.get(url)
         if r.status_code >= 300:
-            raise Exception(f'{r.status_code}')
-        f = open(full_pathname, 'wb')
-        for chunk in r.iter_content(chunk_size=512 * 1024):
-            if chunk:  # filter out keep-alive new chunks
-                f.write(chunk)
-        f.close()
+            self.logger.error(f"status code {r.status_code} on post to {url}")
+            return
+        self.download_to_local_file_path(local_dir, local_filename, parent_dir, r)
         return local_filename
 
-    def DownloadFileFromSTEMWizard(self, original_file, uploaded_file_name):
+    def DownloadFileFromSTEMWizard(self, original_file, uploaded_file_name, local_dir, parent_dir=f'files'):
+        self.logger.debug(f"downloading {original_file} to {local_dir} as {original_file} from STEMWizard")
         self.get_csrf_token()
         headers['X-CSRF-TOKEN'] = self.csrf
         headers['Referer'] = f'{self.url_base}f/fairadmin/ilesAndForms'
         headers['X-Requested-With'] = 'XMLHttpRequest'
-
-        # _token: oFlqz8jzsWM94RAr9LIWN3xoGYQoWW5oa2oodqk1
-        # download_filen_path: /EBS-Stem/stemwizard/webroot/stemwizard/public/assets/uploads/project_files
-        # download_hideData: Rose Research Plan_63561_164230152536.docx
-
         url = f'{self.url_base}/fairadmin/fileDownload'
 
         payload = {'_token': self.token,
@@ -577,14 +625,10 @@ class STEMWizardAPI(object):
                    }
 
         rf = self.session.post(url, data=payload, headers=headers)
-        if rf.status_code != 200:
-            raise ValueError(f"status code {rf.status_code}")
-        fp = open(original_file, 'wb')
-        for chunk in rf.iter_content(chunk_size=1024):
-            if chunk:  # filter out keep-alive new chunks
-                fp.write(chunk)
-        fp.flush()
-        fp.close()
+        if rf.status_code >= 300:
+            self.logger.error(f"status code {rf.status_code} on post to {url}")
+            return
+        self.download_to_local_file_path(local_dir, original_file, parent_dir, rf)
         return original_file
 #
 # if __name__ == '__main__':

@@ -1,5 +1,6 @@
 **.log
 **.log.[0-9]**
+**.sqlite
 **.json
 **.html
 **.pyc
