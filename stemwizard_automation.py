@@ -32,7 +32,7 @@ if __name__ == '__main__':
 
     sw = STEMWizardAPI(configfile=args.configfile)
     if args.download:
-        data = sw.student_status(fileinfo=True, download=False)
+        data = sw.getStudentData_by_category(fileinfo=True, download=False)
     elif args.judges:
         filename, df = sw.export_judge_list()
         stats('judges', df, filename, ['HIGHEST DEGREE ATTAINED', 'SPECIAL AWARD JUDGE',

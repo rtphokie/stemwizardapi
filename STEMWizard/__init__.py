@@ -11,7 +11,9 @@ from STEMWizard.google_sync import NCSEFGoogleDrive
 from STEMWizard.logstuff import get_logger
 import os
 from tqdm import tqdm
-from datetime import timedelta
+from datetime import timedelta, timezone, datetime
+from dateutil import parser
+from STEMWizard.categories import categories
 
 # from requests_toolbelt import MultipartEncoder
 
@@ -29,15 +31,8 @@ class STEMWizardAPI(object):
         :param configfile: configfile: (default to stemwizardapi.yaml)
         '''
         self.authenticated = None
-        # self.session = requests.Session()  # shared session, maintains cookies throughout
-        self.session = requests_cache.CachedSession('STEMWizardAPI_http_cache',
-            # cache_control=True,  # Use Cache-Control headers for expiration, if available
-            expire_after=timedelta(minutes=30),  # Otherwise expire responses after one day
-            allowable_methods=['POST'],
-            allowable_codes=[200],  # Cache 400 responses as a solemn reminder of your failures
-            # match_headers=True,  # Match all request headers
-            stale_if_error=True
-        )
+        self.session = requests.Session()  # shared session, maintains cookies throughout
+        # self.session = requests_cache.CachedSession('caches/STEMWizardAPI_http_cache')
         self.region_domain = 'unknown'
         self.parent_file_dir = 'files'
         self.region_id = None
@@ -154,7 +149,7 @@ class STEMWizardAPI(object):
         '''
         if self.token is None:
             raise ValueError('no token found in object, login before calling export_student_list')
-        self.set_columns(listname)
+        # self.set_columns(listname)
         payload = {'_token': self.token,
                    'filetype': 'xls',
                    'orderby1': '',
@@ -162,7 +157,6 @@ class STEMWizardAPI(object):
                    'searchhere1': ''
                    }
         if listname == 'student':
-            remotepath = f'/Automation/{self.domain}/by student/student list.xlsx'
             url = f'{self.url_base}/fairadmin/export_file'
             payload_specific = {
                 'category_select1': '',
@@ -185,7 +179,6 @@ class STEMWizardAPI(object):
                 'last_year': '',
             }
         elif listname == 'judge':
-            remotepath = f'/Automation/{self.domain}/by judge/judge list.xlsx'
             url = f'{self.url_base}/fairadmin/export_file_judge'
             payload_specific = {
                 'category_select1': '',
@@ -205,23 +198,42 @@ class STEMWizardAPI(object):
                 'dashBoardPage1': '',
             }
         elif listname == 'volunteer':
-            remotepath = f'/Automation/{self.domain}/volunteer list.xlsx'
             url = f'{self.url_base}/fairadmin/exportVolunteerExcelPdf'
             payload_specific = {
                 'searchhere1': '',
                 'registration_status1': '',
                 'last_year': '',
             }
-
+        elif listname == 'paymentStatus':
+            url = f'{self.url_base}/fairadmin/paymentStatus'
+            payload_specific = {
+                'management_user_type_id1': '8',
+                'student_checkin_status1': '',
+                'admin_status1': '',
+                'payment_type1': '',
+                'division1': '0',
+                'number_page': '',
+                'page1': '',
+                'child_fair_select1': '',
+                'origin_fair_select1': '',
+                'teacher_id1': '',
+                'student_completion_status1': '',
+                'final_status1': '',
+                'files_approval_status1': '',
+                'project_status1': '',
+                'checked_fields': '',
+            }
         else:
             raise ValueError(f"unknown list {listname}")
         payload.update(payload_specific)
+        pprint(payload)
 
         self.logger.debug(f'posting to {url} using {listname} params')
         rf = self.session.post(url, data=payload, headers=headers, stream=True)
         if rf.status_code >= 300:
             self.logger.error(f"status code {rf.status_code} on post to {url}")
             return
+        pprint(rf.headers)
         filename_suggested = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
         self.logger.info(f'receiving {filename_suggested}')
         filename_local = f'{self.parent_file_dir}/{self.domain}/{listname}_list.xls'
@@ -236,7 +248,11 @@ class STEMWizardAPI(object):
         ole = olefile.OleFileIO(filename_local)
         df = pd.read_excel(ole.openstream('Workbook'), engine='xlrd')
 
-        self.googleapi.create_file(filename_local, remotepath)
+        remotepath = f'/Automation/{self.domain}/{listname} list.xlsx'
+        if df.shape[0] > 0:
+            self.googleapi.create_file(filename_local, remotepath)
+        else:
+            self.logger.info(f"{listname} list is empty, skipping upload to Google")
         if purge_file:
             try:
                 os.remove(filename_local)
@@ -314,6 +330,7 @@ class STEMWizardAPI(object):
                        'searchhere': '',
                        'registration_status': '', 'last_year': ''
                        }
+
         else:
             raise ValueError(f'unhandled list name {listname} in set_columns')
 
@@ -336,7 +353,30 @@ class STEMWizardAPI(object):
         if r2.status_code != 200:
             raise ValueError(f"status code {r2.status_code} from POST to {url2}")
 
-    def xlsfile_to_df(self, local_filename):
+    def _write_to_cache(self, cache, cache_filename):
+        fp = open(cache_filename, 'w')
+        json.dump(cache, fp, indent=2, default=str)
+        fp.close()
+
+    def _read_cache(self, cache_filename, max_cache_age=600):
+        try:
+            if os.path.isfile(cache_filename):
+                st = os.stat(cache_filename)
+                age = (time.time() - st.st_mtime)
+            else:
+                age = 999999999999999
+            if age < max_cache_age:
+                fp = open(cache_filename, 'r')
+                cache = json.loads(fp.read())
+                fp.close()
+            else:
+                cache = {}
+        except Exception as e:
+            print(e)
+            cache = {}
+        return cache
+
+    def _xlsfile_to_df(self, local_filename):
         ole = olefile.OleFileIO(local_filename)
         df = pd.read_excel(ole.openstream('Workbook'), engine='xlrd')
         return df
@@ -370,14 +410,10 @@ class STEMWizardAPI(object):
                 self.csrf = csrf.get('content')
             self.logger.debug(f"gathered CSRF token {self.csrf}")
 
-    def student_status(self, debug=True, fileinfo=False, download=True, force_file_detail_fetch=False):
-        cache_filename = 'student_data_cache.json'
-        cache = self._read_cache(cache_filename, 600)
-
-        self.logger.debug(f"in student_status, fileinfo {fileinfo}, download {download}")
+    def _getStudentData(self, categoryid):
         payload = {'_token': self.token,
                    'page': 1,
-                   'category_select': '',
+                   'category_select': categoryid,
                    'searchhere': '',
                    'status_select': 'undefined',
                    'research_plan_student_status': 'undefined',
@@ -405,25 +441,97 @@ class STEMWizardAPI(object):
                    }
         self.get_csrf_token()
 
+        self.logger.debug('getting student data')
         url = f'{self.url_base}/filesAndForms/getStudentData'
         r = self.session.post(url, data=payload, headers=headers, stream=True)
         if r.status_code >= 300:
             self.logger.error(f"status code {r.status_code} on post to {url}")
             return
+        html = r.text
+        return html
 
-        soup = BeautifulSoup(r.text, 'lxml')
+    def _extractStudentID(self, s):
+        if s is not None and 'updatedStudentDiv_' in s:
+            studentid = s.replace('updatedStudentDiv_', '')
+        else:
+            studentid = s
+        return studentid
+
+    def _download_files_locally(self, studentid, passed_filedata):
+        filedata=passed_filedata.copy()
+        student_local_dir = f"{self.parent_file_dir}/{self.region_domain}/{studentid}"
+        for documenttype, this_file_data in filedata.items():
+            if this_file_data['file_name'] == 'NONE':
+                continue
+            local_full_path = f"{student_local_dir}/{this_file_data['file_name']}"
+            this_file_data['local_full_path']=local_full_path
+            if os.path.exists(local_full_path):
+                localmtime = datetime.fromtimestamp(os.path.getmtime(local_full_path))
+                this_file_data['local_mtime'] = localmtime
+                download = (this_file_data['updated_on'] is None or localmtime < parser.parse(this_file_data['updated_on'])) and download
+            else:
+                download=True
+            download = download and this_file_data['file_status'] in ['SUBMITTED', 'APPROVED']
+            if download:
+                if this_file_data['file_name'] is None or len(this_file_data['file_name']) < 5:
+                    self.logger.debug(f"{documenttype} not uploaded yet by student {studentid}")
+                    continue
+                if this_file_data['uploaded_file_name'] is not None:
+                    full_pathname, used_cache = self.DownloadFileFromSTEMWizard(this_file_data['file_name'], this_file_data['uploaded_file_name'], f"{studentid}")
+                elif this_file_data['uploaded_file_name'] is None:
+                    full_pathname, used_cache = self.DownloadFileFromS3Bucket(this_file_data['file_url'], f"{studentid}", this_file_data['file_name'])
+                else:
+                    self.logger.error(f"could not determine download for student {studentid} {documenttype}")
+                if os.path.exists(local_full_path):
+                    localmtime = datetime.fromtimestamp(os.path.getmtime(local_full_path))
+                    this_file_data['local_mtime'] = localmtime
+                else:
+                    this_file_data['local_mtime'] = None
+        return filedata
+
+    def getStudentData(self):
+        data_cache = self.getStudentData_by_category()
+        cache_file_name = 'caches/studentData.json'
+        for studentid, data_student in tqdm(data_cache.items(), desc='student file data'):
+            if len(data_student['files']) == 0:
+                data_student['files'] = self.student_file_detail(studentid, data_student['student_info_id'])
+                self._write_to_cache(data_cache, cache_file_name)
+                updated = True
+        for studentid, data_student in tqdm(data_cache.items(), desc='sync files locally'):
+            data_student_updated = self._download_files_locally(studentid, data_student['files'])
+            pass
+
+        return data_cache
+
+    def getStudentData_by_category(self):
+        cache_file_name = 'caches/studentData.json'
+        data = self._read_cache(cache_file_name, max_cache_age=6000)
+        if len(data) == 0:
+            data = {}
+            pbar = tqdm(len(categories), desc="categories")
+            for category_id, category_title in categories.items():
+                pbar.set_description(category_title)
+                # print(category_id, category_title)
+                newdata = self._getFormManagment(category_id)
+                data.update(newdata)
+                pbar.update(1)
+                self.logger.info(f"got StudentData for {len(newdata)} students in category {category_title}")
+            self._write_to_cache(data, cache_file_name)
+        return data
+
+    def _getFormManagment(self, category_id):
+        html = self._getStudentData(category_id)
+        soup = BeautifulSoup(html, 'lxml')
         body = soup.find('tbody')
         rows = body.find_all('tr')
         data = {}
-        self.logger.info(f"got StudentData for {int(len(rows)/2)} students")
         for cnt, row in enumerate(rows):
-            studentid = row.get('id')
-            if studentid is None or 'updatedStudentDiv_' not in studentid:
-                continue
-            else:
-                studentid = studentid.replace('updatedStudentDiv_', '')
+            studentid = self._extractStudentID(row.get('id'))
+            if studentid is None:
+                continue  # this row contains no student data
             cells = row.find_all('td')
-            data[studentid] = {'f_name': None,
+            data[studentid] = {'studentid': studentid,
+                               'f_name': None,
                                'l_name': None,
                                'teacherfullname': None,
                                'project_name': None,
@@ -439,49 +547,7 @@ class STEMWizardAPI(object):
                 self.process_student_data_row(cell, data, studentid)
             if data[studentid]['f_name'] == 'Judy' and data[studentid]['l_name'] == 'Test':
                 continue
-            jkl = f"{self.parent_file_dir}/{self.region_domain}/{studentid}/{data[studentid]['l_name']}_{data[studentid]['f_name']}.json"
-
-
-            if fileinfo:
-                self.sync_student_files_from_stem_wizard(studentid, data[studentid], download, force_file_detail_fetch)
-            else:
-                # get file details from individual cache if skipping the expensive ajax call
-                if os.path.isfile(jkl):
-                    data[studentid] = json.load(jkl)
-            cache[studentid]=data[studentid]
-            print(f"{100 * ((cnt + 1) / len(rows)):3.0f}% {studentid} {data[studentid]['f_name'][:10]:10}", end=" ")
-            print(f"{data[studentid]['l_name'][:10]:10}", end=" ")
-            print(f"{data[studentid]['stud_approval_status'][:10]:10}", end=" ")
-            print(f"{data[studentid]['origin_fair'][:20]:10}", end=" ")
-            print()
-            self._write_to_cache(data[studentid], jkl)
-
-        self._write_to_cache(cache, cache_filename)
-
         return data
-
-    def _write_to_cache(self, cache, cache_filename):
-        fp = open(cache_filename, 'w')
-        json.dump(cache, fp, indent=2)
-        fp.close()
-
-    def _read_cache(self, cache_filename, max_cache_age=600):
-        try:
-            if os.path.isfile(cache_filename):
-                st = os.stat(cache_filename)
-                age = (time.time() - st.st_mtime)
-            else:
-                age = 999999999999999
-            if age < max_cache_age:
-                fp = open(cache_filename, 'r')
-                cache = json.loads(fp.read())
-                fp.close()
-            else:
-                cache = {}
-        except Exception as e:
-            print(e)
-            cache = {}
-        return cache
 
     def process_student_data_row(self, cell, data, studentid):
         id = cell.get('id')
@@ -502,34 +568,50 @@ class STEMWizardAPI(object):
             param = param.replace(f"click_class", '').replace(f'_{studentid}', '')
             data[studentid][param] = value
 
-    def sync_student_files_to_google_drive(self, node, studentid):
-        for formname, formdata in node['files'].items():
-            self.googleapi.create_folder(f"/Automation/{self.domain}/by internal id/{studentid}/{formname}")
-            # print(formname, formdata['file_name'])
-            localpath = f"files/{studentid}/{formname}/{formdata['file_name']}"
-            remotepath = f"/Automation/{self.domain}/by internal id/{id}/{formname}/{formdata['file_name']}"
-            self.googleapi.create_file(localpath, remotepath)
-    def sync_student_files_from_stem_wizard(self, studentid, studentdata, download, force_file_detail_fetch):
+    def sync_student_files_from_stem_wizard(self, studentid, student_local_dir, studentdata, download,
+                                            force_file_detail_fetch):
+        used_cache = False
         if studentdata['stud_com_status'] != 'Complete' or force_file_detail_fetch:
-            self.logger.debug(f"making AJAX call for finfo for {studentid} {studentdata['f_name']} {studentdata['l_name']}")
+            self.logger.debug(
+                f"making AJAX call for finfo for {studentid} {studentdata['f_name']} {studentdata['l_name']}")
             studentdata['files'] = self.student_file_detail(studentid, studentdata['student_info_id'])
-
+        if download:
             for documenttype, filedata in studentdata['files'].items():
-                if download and filedata['file_status'] in ['SUBMITTED', 'APPROVED']:
-                    if 'https' not in filedata['file_name'] and filedata['uploaded_file_name'] is not None:
-                        # pprint(filedata)
-                        fn = self.DownloadFileFromSTEMWizard(filedata['file_name'],
-                                                             filedata['uploaded_file_name'],
-                                                             f"{studentid}/{documenttype.replace(' ', '_')}" )
-                    elif 'https' in filedata['file_url']:
-                                                             fn = self.DownloadFileFromS3Bucket(filedata['file_url'],
-                                                             f"{studentid}/{documenttype.replace(' ', '_')}",
-                                                             filedata['file_name'])
+                print(f"    {documenttype} {filedata['file_name']}")
+                if filedata['file_name'] == 'NONE':
+                    continue
+                local_full_path = f"{student_local_dir}/{filedata['file_name']}"
+                if os.path.exists(local_full_path):
+                    localmtime = datetime.fromtimestamp(os.path.getmtime(local_full_path))
+                    download = localmtime < filedata['updated_on'] and download
+                download = download and filedata['file_status'] in ['SUBMITTED', 'APPROVED']
+                if download:
+                    full_pathname, used_cache = None, None
+                    if filedata['file_name'] is None or len(filedata['file_name']) < 5:
+                        self.logger.debug(f"{documenttype} not uploaded yet by student {studentid}")
+                        continue
+                    if filedata['uploaded_file_name'] is not None:
+                        full_pathname, used_cache = self.DownloadFileFromSTEMWizard(filedata['file_name'],
+                                                                                    filedata['uploaded_file_name'],
+                                                                                    f"{studentid}")
+                    elif filedata['uploaded_file_name'] is None:
+                        try:
+                            full_pathname, used_cache = self.DownloadFileFromS3Bucket(filedata['file_url'],
+                                                                                      f"{studentid}",
+                                                                                      filedata['file_name'])
+                        except Exception as e:
+                            print('-' * 30)
+                            print(f"sync_student_files_from_stem_wizard error: {e}")
+                            pprint(filedata)
+                            print('-' * 30)
+                            raise
                     else:
-                        pprint(filedata)
                         self.logger.error(f"could not determine download for student {studentid} {documenttype}")
 
-    def student_file_detail(self, studentId, info_id, ):
+            if not used_cache:
+                self.sync_student_files_to_google_drive(studentdata, studentid)
+
+    def student_file_detail(self, studentId, info_id ):
         self.logger.debug(f"getting file details for {studentId}")
         self.get_csrf_token()
         url = f'{self.url_base}/filesAndForms/studentFormsAndFilesDetailedView'
@@ -552,18 +634,29 @@ class STEMWizardAPI(object):
         data = {}
         params = []
         thead = table.find('thead')
-        cells = thead.find_all('th')
+        if thead is None:
+            raise Exception('student table not found on files and Forms page')
+        else:
+            cells = thead.find_all('th')
         for cell in cells:
             params.append(cell.text.strip().lower().replace(' ', '_'))
         for row in rows[1:]:
             cells = row.find_all('td')
             for n, cell in enumerate(cells):
+                # 0 type, 1 name, 2 status, 3 approved by, 4 approved dat, 5 updated by, 6 approval status
                 value = None
                 if n == 0:
                     filetype = cell.text.strip()
                     if 'Research Plan' in filetype:
-                        filetype = 'Research Plan'
-                    data[filetype] = {'file_url': None, 'file_status': None, 'uploaded_file_name': None}
+                        filetype = 'Research Plan'  # clean up Research Plan filetype
+                    data[filetype] = {'file_url': None,
+                                      'file_status': None,
+                                      'updated_on': None,
+                                      'updated_by': None,
+                                      'approved_on': None,
+                                      'approved_by': None,
+                                      'uploaded_file_name': None,
+                                      'file_name': None}
                 elif n == 1:
                     # get download link from 2nd column
                     linkele = cell.find('a', {'class': 'downloadProjStudent'})
@@ -574,11 +667,22 @@ class STEMWizardAPI(object):
                         if linkele:
                             data[filetype]['uploaded_file_name'] = linkele.get('uploaded_file_name')
                     value = cell.text.strip()
+                elif n == 4:
+                    divele = cell.find('div')
+                    if divele:
+                        approved_by, approved_on = divele.encode_contents().decode('utf-8').split('<br/>')
+                        data[filetype]['approved_by'] = approved_by.replace("b'", "")
+                        try:
+                            data[filetype]['approved_on'] = parser.parse(approved_on)
+                        except:
+                            data[filetype]['approved_on'] = approved_on
                 elif n == 5:
-                    approved_by, approved_on = cell.find('div').encode_contents().decode('utf-8').split('<br/>')
-                    data[filetype]['approved_by'] = approved_by.replace("b'", "")
-                    data[filetype]['approved_on'] = approved_on
-
+                    updated_by, updated_on = cell.find('div').encode_contents().decode('utf-8').split('<br/>')
+                    data[filetype]['updated_by'] = updated_by.replace("b'", "")
+                    try:
+                        data[filetype]['updated_on'] = parser.parse(updated_on)
+                    except:
+                        data[filetype]['updated_on'] = updated_on
                 else:
                     value = cell.text.strip()
                 if value is not None:
@@ -589,6 +693,7 @@ class STEMWizardAPI(object):
     def download_to_local_file_path(self, local_dir, local_filename, parent_dir, r, force_download=False):
         target_dir = f"{parent_dir}/{self.region_domain}/{local_dir}"
         full_pathname = f"{target_dir}/{local_filename}"
+        used_cache = None
         if not os.path.isfile(full_pathname):
             os.makedirs(target_dir, exist_ok=True)
             if r.status_code >= 300:
@@ -598,22 +703,29 @@ class STEMWizardAPI(object):
                 if chunk:  # filter out keep-alive new chunks
                     f.write(chunk)
             f.close()
-            self.logger.info(f"downloaded to {full_pathname} forced {force_download}")
+            self.logger.info(f"download_to_local_file_path: downloaded to {full_pathname} forced {force_download}")
+            used_cache = False
         else:
-            self.logger.debug(f"using existing {full_pathname}")
+            used_cache = True
+            self.logger.debug(f"download_to_local_file_path: using existing {full_pathname}")
+        return full_pathname, used_cache
 
     def DownloadFileFromS3Bucket(self, url, local_dir, local_filename, parent_dir=f'files'):
-        self.logger.debug(f"downloading {url} to {local_dir} as {local_filename} from S3")
+        self.logger.debug(f"DownloadFileFromS3Bucket: downloading {url} to {local_dir} as {local_filename} from S3")
         r = self.session.get(url)
+
         if r.status_code >= 300:
             self.logger.error(f"status code {r.status_code} on post to {url}")
             return
-        self.download_to_local_file_path(local_dir, local_filename, parent_dir, r)
-        return local_filename
+        else:
+            self.logger.debug(f"status code {r.status_code} on post to {url}")
+
+        return self.download_to_local_file_path(local_dir, local_filename, parent_dir, r)
 
     def DownloadFileFromSTEMWizard(self, original_file, uploaded_file_name, local_dir, parent_dir=f'files'):
-        self.logger.debug(f"downloading {original_file} to {local_dir} as {original_file} from STEMWizard")
-        self.get_csrf_token()
+        self.logger.debug(
+            f"DownloadFileFromSTEMWizard: downloading {original_file} to {local_dir} as {original_file} from STEMWizard")
+        # self.get_csrf_token()
         headers['X-CSRF-TOKEN'] = self.csrf
         headers['Referer'] = f'{self.url_base}f/fairadmin/ilesAndForms'
         headers['X-Requested-With'] = 'XMLHttpRequest'
@@ -628,22 +740,18 @@ class STEMWizardAPI(object):
         if rf.status_code >= 300:
             self.logger.error(f"status code {rf.status_code} on post to {url}")
             return
-        self.download_to_local_file_path(local_dir, original_file, parent_dir, rf)
-        return original_file
-#
-# if __name__ == '__main__':
-#     parser = argparse.ArgumentParser(description='synchronize with STEM Wizard')
-#     parser.add_argument('--files', help='fetch files and forms', action='store_true')
-#     parser.add_argument('--student', help='gather student data', action='store_true')
-#     parser.add_argument('--judge', help='gather judge data', action='store_true')
-#     parser.add_argument('--volunteer', help='gather volunteer data', action='store_true')
-#
-#     parser.add_argument('--sum', dest='accumulate', action='store_const',
-#                         const=sum, default=max,
-#                         help='sum the integers (default: find the max)')
-#
-#     args = parser.parse_args()
-#     if args.judge:
-#         raise ValueError("judge automation not implemented")
-#     if args.volunteer:
-#         raise ValueError("volunteer automation not implemented")
+        return self.download_to_local_file_path(local_dir, original_file, parent_dir, rf)
+
+    def sync_student_files_to_google_drive(self, node, studentid):
+        # Creating a folder for each student and uploading the files to that folder.
+        for formname, formdata in node['files'].items():
+            if formdata['file_name'] == 'NONE':
+                continue
+            remote_dir = f"/Automation/{self.domain}/by internal id/{studentid}"
+            self.googleapi.create_folder(remote_dir)
+            localpath = f"{self.parent_file_dir}/{self.domain}/{studentid}/{formdata['file_name']}"
+            remotepath = f"{remote_dir}/{formdata['file_name']}"
+            # if 'ISEF 3' == formname:
+            #     pass
+            self.googleapi.create_file(localpath, remotepath)
+            self.logger.info(f"uploaded to {remotepath}")

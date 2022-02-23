@@ -8,8 +8,10 @@ from pydrive2.drive import GoogleDrive
 from googleapiclient.discovery import build
 from dateutil import parser
 from datetime import datetime, timedelta, timezone
-
 import json
+import os
+from dateutil import parser
+import pytz
 
 logger = get_logger('google')
 
@@ -41,6 +43,7 @@ class NCSEFGoogleDrive(object):
                          }
 
     def __init__(self):
+        self.cache_file_name = 'caches/GoogleDriveCache.json'
         self.drive = self._auth()
         self.ids = None
         self.last_updated = None
@@ -104,15 +107,39 @@ class NCSEFGoogleDrive(object):
                 raise ValueError(f"{child} id not found under {node['title']}")
 
     def _write_cache(self):
-        fp = open('GoogleDriveCache.json', 'w')
+        fp = open(self.cache_file_name, 'w')
         json.dump({'ids': self.ids,
                    'last_updated': self.last_updated,
                    'last_checked': self.last_checked}, fp, indent=2)
         fp.close()
 
-    def list_all(self, id=None, cache_checked_ttl=300, cache_update_ttl=21600):
+    def _find_file(self, fullpath, refresh=False):
+        found = False
+        isafolder = False
+        elements = fullpath.split('/')
+        parentpath = '/'.join(elements[:-1])
+        title = None
+        parentid = None
+        nodeid = None
+        nodedata = None
+
+        for id, data in self.ids.items():
+            if data['fullpath'] == parentpath:
+                parentid = id
+            if data['fullpath'] == fullpath:
+                found = True
+                nodeid = id
+                title = data['title']
+                nodedata = data
+                isafolder = data['mimeType'] == NCSEFGoogleDrive.FOLDER_MIME_TYPE
+        if not found and refresh:
+            self.list_all(force=True)
+            nodeid, parentid, parentpath, title, isafolder = self._find_file(fullpath, refresh=False)
+        return nodeid, parentid, parentpath, title, isafolder
+
+    def list_all(self, id=None, cache_checked_ttl=300, cache_update_ttl=21600, force=False):
         try:
-            fp = open('GoogleDriveCache.json', 'r')
+            fp = open(self.cache_file_name, 'r')
             cache = json.loads(fp.read())
             fp.close()
             cache_by_id = cache['ids']
@@ -128,15 +155,15 @@ class NCSEFGoogleDrive(object):
         checked_delta = utcnow - parser.isoparse(last_checked)
         updated_delta = utcnow - parser.isoparse(last_updated)
 
-        if checked_delta.total_seconds() > cache_checked_ttl:  # or updated_delta.total_seconds() > cache_update_ttl:
+        if force or checked_delta.total_seconds() > cache_checked_ttl or updated_delta.total_seconds() > cache_update_ttl:
             logger.info(f'refetching file info, last checked {checked_delta.total_seconds() / 60:.1f} minutes ago')
             last_checked = utcnow.isoformat()
             for file_list in self.drive.ListFile({'q': 'trashed=false', 'maxResults': 500}):
                 for fileinfo in file_list:
-                    if fileinfo['mimeType'] == NCSEFGoogleDrive.FOLDER_MIME_TYPE:
-                        pass
-                    elif 'shortcut' in fileinfo['mimeType']:
-                        continue
+                    # if fileinfo['mimeType'] == NCSEFGoogleDrive.FOLDER_MIME_TYPE:
+                    #     pass
+                    # elif 'shortcut' in fileinfo['mimeType']:
+                    #     continue
                     cache_by_id[fileinfo['id']] = fileinfo
                     cache_by_id[fileinfo['id']]['children'] = []
                     cache_by_id[fileinfo['id']]['fullpath'] = ''
@@ -164,55 +191,84 @@ class NCSEFGoogleDrive(object):
 
         self._write_cache()
 
-    def create_file(self, localpath, remotepath, mimeType='application/vnd.google-apps.file'):
-        found_node = False
-        for id, node in self.ids.items():
-            if node['fullpath'] == remotepath:
-                found_node = id
-        found_parent_id, found_parent_folder, parentid, parentpath, title = self._find_file(remotepath)
-        if found_node:
-            print(parentpath, parentid)
-            item = self.drive.CreateFile({'id': found_node})
-            item.SetContentFile(localpath)
-            item.Upload()
-            logger.info(f'updated {remotepath} {found_node} from {localpath}')
-        elif not found_parent_id:
-            if parentid is None:
+    def create_shortcut(self, fullpath_link_to, folder_to_put_link_in, title):
+        shortcut, _, _, _, _ = self._find_file(f"{folder_to_put_link_in}/{title}", refresh=True)
+        if not shortcut:
+            id_to_link_to, _, _, _, _ = self._find_file(fullpath_link_to)
+            id_to_create_link_in, _, _, _, _ = self._find_file(folder_to_put_link_in)
+
+            shortcut_metadata = {
+                "title": title,
+                'mimeType': 'application/vnd.google-apps.shortcut',
+                "parents": [{"id": id_to_create_link_in}],
+                "shortcutDetails": {"targetId": id_to_link_to,
+                                    "targetMimeType": 'application/vnd.google-apps.folder'}
+            }
+            shortcut = self.drive.CreateFile(shortcut_metadata)
+            shortcut.Upload()
+        return shortcut
+
+    def create_file(self, localpath, remotepath, mimeType='application/vnd.google-apps.file', update_on='newer'):
+        nodeid, parentid, parentpath, title, isafolder = self._find_file(remotepath)
+        # if not nodeid or (nodeid and update_on in ['always', 'newer']):
+        # Google returns timezone aware UTC ISO8601 dates
+        upload = None
+        if nodeid and update_on == 'newer':
+            remotemtime = parser.parse(self.ids[nodeid]['modifiedDate'])
+            # OS returns timezone unaware in the local timezone, gotta make it aware for comparison
+            localmtime = datetime.fromtimestamp(os.path.getmtime(localpath))
+            localmtime = localmtime.replace(tzinfo=pytz.timezone('America/New_York'))
+            upload = update_on == 'newer' and localmtime > remotemtime
+        else:
+            upload = True
+
+        if upload:
+            elements = remotepath.split('/')
+            title = elements[-1]
+            if not parentid:
                 logger.debug(f'creating {parentpath}')
                 parentitem = self.create_folder(parentpath)
                 parentid = parentitem['id']
-
+            item = self.drive.CreateFile({'id': nodeid})
+            item.SetContentFile(localpath)
+            item.Upload()
+            logger.info(f'updated {remotepath} {nodeid} from {localpath}')
             for ext, mtype in NCSEFGoogleDrive.common_mime_types.items():
                 if localpath.endswith(f'.{ext}'):
                     mimeType = mtype
-            item = self.drive.CreateFile(
-                {"title": title, "parents": [{"id": parentid}],
-                 "mimeType": mimeType}
-            )
+            metadata = {"title": title, "parents": [{"id": parentid}], "mimeType": mimeType}
+            item = self.drive.CreateFile(metadata)
             item.SetContentFile(localpath)
             item.Upload()
             logger.info(f'created {remotepath}')
+        elif update_on == 'newer' and localmtime < remotemtime:
+            logger.info(f'no update needed for {remotepath}')
         else:
-            logger.error(f'{remotepath} already exists')
+            logger.error('create_file unknown error')
 
-    def create_folder(self, fullpath, expectedroot='Automation', refresh=True):
+        # elif nodeid and update_on not in ['always', 'newer']:
+        #     logger.info(f'skipping update for existing {remotepath}')
+
+    def create_folder(self, full_remote_path, expectedroot='Automation', refresh=False):
         item = {}
-        found, found_folder, parentid, parentpath, title = self._find_file(fullpath)
-        if found and found_folder:
-            logger.warning(f"folder {fullpath} already exists")
-        elif found and not found_folder:
-            logger.error(f"{fullpath} already exists as a non-folder")
+        nodeid, parentid, parentpath, title, isafolder = self._find_file(full_remote_path)
+        if isafolder:
+            logger.warning(f"folder {full_remote_path} already exists")
+        elif nodeid and not isafolder:
+            logger.error(f"{full_remote_path} already exists as a non-folder")
         else:
+            elements = full_remote_path.split('/')
+            parentpath = '/'.join(elements[:-1])
+            title = elements[-1]
             if parentid is None:
                 raise ValueError(f'parent folder {parentpath} not found')
-            item = self.drive.CreateFile(
-                {"title": title, "parents": [{"id": parentid}],
-                 "mimeType": NCSEFGoogleDrive.FOLDER_MIME_TYPE}
-            )
+            metadata = {"title": title, "parents": [{"id": parentid}],
+                        "mimeType": NCSEFGoogleDrive.FOLDER_MIME_TYPE}
+            item = self.drive.CreateFile(metadata)
             item.Upload()
 
             # update local cache
-            item['fullpath'] = fullpath
+            item['fullpath'] = full_remote_path
             item['children'] = []
             self.ids[item['id']] = item
             self._write_cache()
@@ -223,22 +279,6 @@ class NCSEFGoogleDrive(object):
             if refresh:
                 self.list_all(cache_update_ttl=0)
         return item
-
-    def _find_file(self, fullpath):
-        found = False
-        found_folder = False
-        elements = fullpath.split('/')
-        parentpath = '/'.join(elements[:-1])
-        title = elements[-1]
-        parentid = None
-        for id, data in self.ids.items():
-            if data['fullpath'] == parentpath:
-                parentid = id
-            if data['fullpath'] == fullpath:
-                found = True
-                if data['mimeType'] == NCSEFGoogleDrive.FOLDER_MIME_TYPE:
-                    found_folder = True
-        return found, found_folder, parentid, parentpath, title
 
 
 def get_sheet(sheetname):

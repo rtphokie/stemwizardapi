@@ -5,7 +5,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 
 def get_logger(domain, level=logging.DEBUG):
-    path=f"stemwizard_{domain}.log"
+    path=f"logs/stemwizard_{domain}.log"
     if '.log' not in path:
         path += '.log'
     logger = logging.getLogger(path)
