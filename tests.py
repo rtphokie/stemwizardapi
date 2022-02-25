@@ -179,6 +179,16 @@ class NCSEF_prod_TestCases_operation(unittest.TestCase):
 
 
 class devtest(unittest.TestCase):
+    def test_ggetCustomFiles(self):
+        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
+        uut.DownloadFileFromSTEMWizard('UP UP and AWAY_1644707023.pptx',
+                                       'UP UP and AWAY_1644707023.pptx',
+                                       '.',
+                                       remotedir='images/milestone_uploads',
+                                       referer='studentmilestonereport/region/3153/15257'
+                                       )
+        # uut.getCustomFiles()
+
     def test_google_clean_empty_dirs(self):
         uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False)
         parentid = '1wiIOz_ZdPHoOBNjJcb1HX-L2NqX5urQx'
@@ -209,9 +219,9 @@ class devtest(unittest.TestCase):
                '2022 NCSEF Participant Signature Page'}
 
         for sid, data in data_cache.items():
-            missing=min-set(data['files'].keys())
+            missing = min - set(data['files'].keys())
             print(sid, missing)
-            if len(missing) ==0:
+            if len(missing) == 0:
                 src = f'../files/ncsef/{sid}'
                 dst = f"links/{data['l_name']},{data['f_name']}"
                 os.symlink(src, dst)

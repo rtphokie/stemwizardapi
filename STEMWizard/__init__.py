@@ -63,11 +63,11 @@ class STEMWizardAPI(object):
         self.logger.info(f"destroyed session with {self.domain}")
 
     def _read_config(self, configfile):
-        '''
+        """
         reads named yaml configuration file
         :param configfile: (defaulted to stemwizardapi.yaml above)
         :return: nothing, updates username, password and token attribuates on the object
-        '''
+        """
         fp = open(configfile, 'r')
         data_loaded = yaml.safe_load(fp)
         self.domain = data_loaded['domain']
@@ -180,6 +180,53 @@ class STEMWizardAPI(object):
         self.logger.info(f'receiving {filename}')
         filename_local = f'{self.parent_file_dir}/{self.domain}/{filename}_list_all_data.xls'
 
+        fp = open(filename_local, 'wb')
+        for chunk in rf.iter_content(chunk_size=1024):
+            if chunk:  # filter out keep-alive new chunks
+                fp.write(chunk)
+        fp.flush()
+        fp.close()
+
+    def getCustomFiles(self):
+        # _token: lmUMn80PXkk3my7mkYbhzwgT4XlE67vuo69gBq23
+        # filetype: excel
+        # orderby1:
+        # sortby1:
+        # searchhere1:
+        # category_select1:
+        # division1:
+        # classperiod_select1:
+        # grade_select1:
+        # student_completion_status1:
+        # student_checkin_status1:
+        # student_activation_status1:
+        # student_milestone_status1:
+        # student_completion_status:
+        # admin_status:
+        # final_status:
+        # files_approval_status:
+        # st_stmile_id1: 3153
+        # get_class_periods_count1: 0
+        # get_teacher_count1: 0
+        # get_teacher_contact_email_status1: 1
+        # child_fair_select1:
+        payload = {'_token': self.token,
+                   'filetype': 'excel',
+                   'st_stmile_id1': 3153,
+                   }
+        # https://ncsef.stemwizard.com/fairadmin/getstudentCustomMilestoneDetailView
+        # https://ncsef.stemwizard.com/fairadmin/getstudentCustomMilestoneDetailView
+        # https://ncsef.stemwizard.com/fairadmin/exportmilestonereport
+        url = f'{self.url_base}/fairadmin/exportmilestonereport'
+
+        pprint(payload)
+        # self.logger.debug(f'posting to {url} using {listname} params')
+        rf = self.session.post(url, data=payload, headers=headers)
+        if rf.status_code >= 300:
+            self.logger.error(f"status code {rf.status_code} on post to {url}")
+            return
+        print(rf.status_code)
+        filename_local = '/tmp/CustomMilestoneDetailView.xls'
         fp = open(filename_local, 'wb')
         for chunk in rf.iter_content(chunk_size=1024):
             if chunk:  # filter out keep-alive new chunks
@@ -562,14 +609,19 @@ class STEMWizardAPI(object):
         for studentid in tqdm(idstofetchfiledetailfor, 'student file data'):
             data_student['files'] = self.student_file_detail(studentid, data_student[studentid]['student_info_id'])
             self._write_to_cache(data_cache, cache_file_name)
-        for studentid, data_student in tqdm(data_cache.items(), desc='links to internal id folder'):
-            if data_student['project_no'] is not None:
-                div, cat, _ = data_student['project_no'].split('-')
-                remote_div_dir = f"/Automation/{self.region_domain}/by category/{div}"
-                self.googleapi.create_folder(remote_div_dir)
-                self.googleapi.create_folder(f"{remote_div_dir}/{cat}")
-                self.googleapi.create_shortcut(f"/Automation/{self.region_domain}/by internal id/{studentid}",
-                                               f"{remote_div_dir}/{cat}", data_student['project_no'])
+        for studentid, data_student in tqdm(data_cache.items(), desc='folder links'):
+            if data_student['project_no'] != '':
+                try:
+                    div, cat, _ = data_student['project_no'].split('-')
+                    remote_div_dir = f"/Automation/{self.region_domain}/by category/{div}"
+                    self.googleapi.create_folder(remote_div_dir)
+                    self.googleapi.create_folder(f"{remote_div_dir}/{cat}")
+                    self.googleapi.create_shortcut(f"/Automation/{self.region_domain}/by internal id/{studentid}",
+                                                   f"{remote_div_dir}/{cat}", data_student['project_no'])
+                except Exception as e:
+                    pprint(data_student)
+                    self.logger.error(f"{studentid} {e}")
+
             self.googleapi.create_shortcut(
                 f"/Automation/{self.region_domain}/by internal id/{studentid}",
                 f"/Automation/{self.region_domain}/by student",
@@ -733,17 +785,20 @@ class STEMWizardAPI(object):
         target_dir = f"{parent_dir}/{self.region_domain}/{local_dir}"
         full_pathname = f"{target_dir}/{local_filename}"
         used_cache = None
-        if not os.path.isfile(full_pathname):
+        if not os.path.isfile(full_pathname) or True:
             os.makedirs(target_dir, exist_ok=True)
             if r.status_code >= 300:
                 raise Exception(f'{r.status_code}')
-            f = open(full_pathname, 'wb')
-            for chunk in r.iter_content(chunk_size=512 * 1024):
-                if chunk:  # filter out keep-alive new chunks
-                    f.write(chunk)
-            f.close()
-            self.logger.info(f"download_to_local_file_path: downloaded to {full_pathname} forced {force_download}")
-            used_cache = False
+            if r.headers['Content-Type'] == 'text/html':
+                self.logger.error(f"failed to download {local_filename}")
+            else:
+                f = open(full_pathname, 'wb')
+                for chunk in r.iter_content(chunk_size=512 * 1024):
+                    if chunk:  # filter out keep-alive new chunks
+                        f.write(chunk)
+                f.close()
+                self.logger.info(f"download_to_local_file_path: downloaded to {full_pathname} forced {force_download}")
+                used_cache = False
         else:
             used_cache = True
             self.logger.debug(f"download_to_local_file_path: using existing {full_pathname}")
@@ -761,17 +816,20 @@ class STEMWizardAPI(object):
 
         return self.download_to_local_file_path(local_dir, local_filename, parent_dir, r)
 
-    def DownloadFileFromSTEMWizard(self, original_file, uploaded_file_name, local_dir, parent_dir=f'files'):
+    def DownloadFileFromSTEMWizard(self, original_file, uploaded_file_name, local_dir,
+                                   remotedir='uploads/project_files',
+                                   parent_dir=f'files',
+                                   referer='FilesAndForms',
+                                   ):
         self.logger.debug(
             f"DownloadFileFromSTEMWizard: downloading {original_file} to {local_dir} as {original_file} from STEMWizard")
-        # self.get_csrf_token()
+        self.get_csrf_token()
         headers['X-CSRF-TOKEN'] = self.csrf
-        headers['Referer'] = f'{self.url_base}f/fairadmin/ilesAndForms'
-        headers['X-Requested-With'] = 'XMLHttpRequest'
+        headers['Referer'] = f'{self.url_base}f/fairadmin/{referer}'
         url = f'{self.url_base}/fairadmin/fileDownload'
 
         payload = {'_token': self.token,
-                   'download_filen_path': '/EBS-Stem/stemwizard/webroot/stemwizard/public/assets/uploads/project_files',
+                   'download_filen_path': f'/EBS-Stem/stemwizard/webroot/stemwizard/public/assets/{remotedir}',
                    'download_hideData': uploaded_file_name,
                    }
 
@@ -790,5 +848,8 @@ class STEMWizardAPI(object):
             self.googleapi.create_folder(remote_dir)
             localpath = f"{self.parent_file_dir}/{self.domain}/{studentid}/{formdata['file_name']}"
             remotepath = f"{remote_dir}/{formdata['file_name']}"
-            jkl = self.googleapi.create_file(localpath, remotepath)
-            self.logger.info(f"uploaded to {remotepath}")
+            try:
+                jkl = self.googleapi.create_file(localpath, remotepath)
+                self.logger.info(f"uploaded to {remotepath}")
+            except Exception as e:
+                self.logger.error(e)

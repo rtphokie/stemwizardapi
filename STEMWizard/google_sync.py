@@ -193,7 +193,7 @@ class NCSEFGoogleDrive(object):
         self._write_cache()
 
     def create_shortcut(self, fullpath_link_to, folder_to_put_link_in, title):
-        shortcut, _, _, _, _ = self._find_file(f"{folder_to_put_link_in}/{title}", refresh=True)
+        shortcut, _, _, _, _ = self._find_file(f"{folder_to_put_link_in}/{title}", refresh=False)
         if not shortcut:
             id_to_link_to, _, _, _, _ = self._find_file(fullpath_link_to)
             id_to_create_link_in, _, _, _, _ = self._find_file(folder_to_put_link_in)
@@ -254,7 +254,7 @@ class NCSEFGoogleDrive(object):
         else:
             logger.error('create_file unknown error')
 
-    def create_folder(self, full_remote_path, expectedroot='Automation', refresh=False):
+    def create_folder(self, full_remote_path, expectedroot='Automation', refresh=True):
         item = {}
         nodeid, parentid, parentpath, title, isafolder = self._find_file(full_remote_path)
         if nodeid and not isafolder:
