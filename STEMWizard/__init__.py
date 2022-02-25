@@ -2,16 +2,15 @@ from bs4 import BeautifulSoup
 from pprint import pprint
 import json
 import olefile
-import os
 import pandas as pd
-import requests, requests_cache
+import requests
 import time
 import yaml
 from STEMWizard.google_sync import NCSEFGoogleDrive
 from STEMWizard.logstuff import get_logger
 import os
 from tqdm import tqdm
-from datetime import timedelta, timezone, datetime
+from datetime import datetime
 from dateutil import parser
 from STEMWizard.categories import categories
 
@@ -24,7 +23,7 @@ headers = {
 
 class STEMWizardAPI(object):
 
-    def __init__(self, configfile='stemwizardapi.yaml'):
+    def __init__(self, configfile='stemwizardapi.yaml', login_stemwizard=True, login_google=True):
         '''
         initiates a session using credentials in the specified configuration file
         Note that this user must be an administrator on the STEM Wizard site.
@@ -39,7 +38,8 @@ class STEMWizardAPI(object):
         self.csrf = None
         self.username = None
         self.password = None
-        self.googleapi = NCSEFGoogleDrive()
+        if login_google:
+            self.googleapi = NCSEFGoogleDrive()
 
         self._read_config(configfile)
         self.logger = get_logger(self.domain)
@@ -51,7 +51,8 @@ class STEMWizardAPI(object):
 
         self._get_region_info()
 
-        self.authenticated = self.login()
+        if login_stemwizard:
+            self.authenticated = self.login()
 
         if self.region_domain != self.domain:
             raise ValueError(
@@ -127,7 +128,7 @@ class STEMWizardAPI(object):
         rp = self.session.post(url_login, data=payload, headers=headers,
                                allow_redirects=True)  # , cookies=session_cookies)
         if rp.status_code >= 300:
-            self.logger.error(f"status code {rp.status_code} on post to {url}")
+            self.logger.error(f"status code {rp.status_code} on post to {url_login}")
             return
 
         # self.token = token
@@ -139,6 +140,52 @@ class STEMWizardAPI(object):
             self.logger.error(f"failed to authenticate to {self.domain}")
 
         return authenticated
+
+    def generate_all_data_report(self, usertype, purge_file=False):
+        if self.token is None:
+            raise ValueError('no token found in object, login before calling export_student_list')
+        # self.set_columns(listname)
+        # saved_report_id: 948
+        # user_type: 3
+        # downloadSavedReport: savedReport
+        payload = {'_token': self.token}
+
+        # https://ncsef.stemwizard.com/fairadmin/generateReport
+        # discover form names and lookup ids rather than use hard coded ids
+        if usertype == 'student':
+            payload['user_type'] = 1
+            payload['saved_report_id'] = 949
+            url = f'{self.url_base}/fairadmin/generateReport'
+        elif usertype == 'judge':
+            payload['user_type'] = 3
+            payload['saved_report_id'] = 948
+            url = f'{self.url_base}/fairadmin/generateReport'
+        elif usertype == 'ISEF':
+            user_type = 5
+            url = f'{self.url_base}/fairadmin/ISEFReports'
+        else:
+            msg = f"unknown user type {usertype} in report generation"
+            self.logger.error(msg)
+            raise ValueError(msg)
+        self.logger.debug(f'generating {usertype} report to {url}')
+        headers['Cache-Control'] = 'max-age=0'
+        pprint(payload)
+        raise
+        rf = self.session.post(url, data=payload, headers=headers, stream=True)
+        if rf.status_code >= 300:
+            self.logger.error(f"status code {rf.status_code} on post to {url}")
+            return
+        pprint(rf.headers)
+        filename = f"{usertype}.xlsx"
+        self.logger.info(f'receiving {filename}')
+        filename_local = f'{self.parent_file_dir}/{self.domain}/{filename}_list_all_data.xls'
+
+        fp = open(filename_local, 'wb')
+        for chunk in rf.iter_content(chunk_size=1024):
+            if chunk:  # filter out keep-alive new chunks
+                fp.write(chunk)
+        fp.flush()
+        fp.close()
 
     def export_list(self, listname, purge_file=False):
         '''
@@ -226,14 +273,12 @@ class STEMWizardAPI(object):
         else:
             raise ValueError(f"unknown list {listname}")
         payload.update(payload_specific)
-        pprint(payload)
 
         self.logger.debug(f'posting to {url} using {listname} params')
         rf = self.session.post(url, data=payload, headers=headers, stream=True)
         if rf.status_code >= 300:
             self.logger.error(f"status code {rf.status_code} on post to {url}")
             return
-        pprint(rf.headers)
         filename_suggested = rf.headers['Content-Disposition'].replace('attachment; filename="', '').rstrip('"')
         self.logger.info(f'receiving {filename_suggested}')
         filename_local = f'{self.parent_file_dir}/{self.domain}/{listname}_list.xls'
@@ -396,9 +441,7 @@ class STEMWizardAPI(object):
         fp.close()
 
     def get_csrf_token(self):
-        if self.csrf is not None:
-            self.logger.debug(f"using existing CSRF token")
-        else:
+        if self.csrf is None:
             url = f'{self.url_base}/filesAndForms'
             r = self.session.get(url, headers=headers)
             if r.status_code >= 300:
@@ -408,7 +451,7 @@ class STEMWizardAPI(object):
             csrf = soup.find('meta', {'name': 'csrf-token'})
             if csrf is not None:
                 self.csrf = csrf.get('content')
-            self.logger.debug(f"gathered CSRF token {self.csrf}")
+            self.logger.info(f"gathered CSRF token {self.csrf}")
 
     def _getStudentData(self, categoryid):
         payload = {'_token': self.token,
@@ -441,7 +484,6 @@ class STEMWizardAPI(object):
                    }
         self.get_csrf_token()
 
-        self.logger.debug('getting student data')
         url = f'{self.url_base}/filesAndForms/getStudentData'
         r = self.session.post(url, data=payload, headers=headers, stream=True)
         if r.status_code >= 300:
@@ -458,28 +500,40 @@ class STEMWizardAPI(object):
         return studentid
 
     def _download_files_locally(self, studentid, passed_filedata):
-        filedata=passed_filedata.copy()
+        filedata = passed_filedata.copy()
         student_local_dir = f"{self.parent_file_dir}/{self.region_domain}/{studentid}"
         for documenttype, this_file_data in filedata.items():
+            download = None
             if this_file_data['file_name'] == 'NONE':
                 continue
             local_full_path = f"{student_local_dir}/{this_file_data['file_name']}"
-            this_file_data['local_full_path']=local_full_path
+            this_file_data['local_full_path'] = local_full_path
             if os.path.exists(local_full_path):
                 localmtime = datetime.fromtimestamp(os.path.getmtime(local_full_path))
                 this_file_data['local_mtime'] = localmtime
-                download = (this_file_data['updated_on'] is None or localmtime < parser.parse(this_file_data['updated_on'])) and download
+                try:
+                    if type(this_file_data['updated_on']) is str:
+                        # when cached, datetimes are serialized to strings
+                        this_file_data['updated_on'] = parser.parse(this_file_data['updated_on'])
+                    download = this_file_data['updated_on'] is None or localmtime < this_file_data['updated_on']
+                except:
+                    pprint(this_file_data)
+                    raise
             else:
-                download=True
+                download = True
             download = download and this_file_data['file_status'] in ['SUBMITTED', 'APPROVED']
             if download:
                 if this_file_data['file_name'] is None or len(this_file_data['file_name']) < 5:
                     self.logger.debug(f"{documenttype} not uploaded yet by student {studentid}")
                     continue
                 if this_file_data['uploaded_file_name'] is not None:
-                    full_pathname, used_cache = self.DownloadFileFromSTEMWizard(this_file_data['file_name'], this_file_data['uploaded_file_name'], f"{studentid}")
+                    full_pathname, used_cache = self.DownloadFileFromSTEMWizard(this_file_data['file_name'],
+                                                                                this_file_data['uploaded_file_name'],
+                                                                                f"{studentid}")
                 elif this_file_data['uploaded_file_name'] is None:
-                    full_pathname, used_cache = self.DownloadFileFromS3Bucket(this_file_data['file_url'], f"{studentid}", this_file_data['file_name'])
+                    full_pathname, used_cache = self.DownloadFileFromS3Bucket(this_file_data['file_url'],
+                                                                              f"{studentid}",
+                                                                              this_file_data['file_name'])
                 else:
                     self.logger.error(f"could not determine download for student {studentid} {documenttype}")
                 if os.path.exists(local_full_path):
@@ -490,15 +544,42 @@ class STEMWizardAPI(object):
         return filedata
 
     def getStudentData(self):
+        # get basic data about students, names, school, overall approval status
         data_cache = self.getStudentData_by_category()
         cache_file_name = 'caches/studentData.json'
-        for studentid, data_student in tqdm(data_cache.items(), desc='student file data'):
+        idstofetchfiledetailfor = set()
+        for studentid, data_student in tqdm(data_cache.items(), desc='student json'):
+            student_local_dir = f"files/{self.region_domain}/{studentid}"
+            os.makedirs(student_local_dir, exist_ok=True)
+            jsonfilename = f"{student_local_dir}/{data_student['l_name']},{data_student['f_name']}.json"
+            jsonfilename = jsonfilename.replace("\n", ',')
+            jsonfilename = jsonfilename.replace("  ", '')
+            jsonfilename = jsonfilename.replace(" ", '')
+            self._write_to_cache(data_student, jsonfilename)
             if len(data_student['files']) == 0:
-                data_student['files'] = self.student_file_detail(studentid, data_student['student_info_id'])
-                self._write_to_cache(data_cache, cache_file_name)
-                updated = True
+                idstofetchfiledetailfor.add(studentid)
+                # get information their files and forms
+        for studentid in tqdm(idstofetchfiledetailfor, 'student file data'):
+            data_student['files'] = self.student_file_detail(studentid, data_student[studentid]['student_info_id'])
+            self._write_to_cache(data_cache, cache_file_name)
+        for studentid, data_student in tqdm(data_cache.items(), desc='links to internal id folder'):
+            if data_student['project_no'] is not None:
+                div, cat, _ = data_student['project_no'].split('-')
+                remote_div_dir = f"/Automation/{self.region_domain}/by category/{div}"
+                self.googleapi.create_folder(remote_div_dir)
+                self.googleapi.create_folder(f"{remote_div_dir}/{cat}")
+                self.googleapi.create_shortcut(f"/Automation/{self.region_domain}/by internal id/{studentid}",
+                                               f"{remote_div_dir}/{cat}", data_student['project_no'])
+            self.googleapi.create_shortcut(
+                f"/Automation/{self.region_domain}/by internal id/{studentid}",
+                f"/Automation/{self.region_domain}/by student",
+                f"{data_student['l_name']}, {data_student['f_name']}")
         for studentid, data_student in tqdm(data_cache.items(), desc='sync files locally'):
-            data_student_updated = self._download_files_locally(studentid, data_student['files'])
+            # download those files and forms as necessary
+            data_student_files_updated = self._download_files_locally(studentid, data_student['files'])
+        for studentid, data_student in tqdm(data_cache.items(), desc='sync to Google Drive'):
+            # sync those local file up to Google Drive
+            data_student_files_updated = self.sync_student_files_to_google_drive(studentid, data_student['files'])
             pass
 
         return data_cache
@@ -510,8 +591,7 @@ class STEMWizardAPI(object):
             data = {}
             pbar = tqdm(len(categories), desc="categories")
             for category_id, category_title in categories.items():
-                pbar.set_description(category_title)
-                # print(category_id, category_title)
+                pbar.set_description(f"{category_title:20}")
                 newdata = self._getFormManagment(category_id)
                 data.update(newdata)
                 pbar.update(1)
@@ -544,12 +624,13 @@ class STEMWizardAPI(object):
                                'stud_approval_status': None,
                                'files': {}}
             for cell in cells:
-                self.process_student_data_row(cell, data, studentid)
+                data[studentid].update(self.process_student_data_row(cell, studentid))
             if data[studentid]['f_name'] == 'Judy' and data[studentid]['l_name'] == 'Test':
                 continue
         return data
 
-    def process_student_data_row(self, cell, data, studentid):
+    def process_student_data_row(self, cell, studentid):
+        data = {}
         id = cell.get('id')
         param = cell.get('class')
         if type(param) is list:
@@ -561,57 +642,15 @@ class STEMWizardAPI(object):
         if link is not None:
             student_info_id = link.get('student_info_id')
             if student_info_id:
-                data[studentid]['student_info_id'] = student_info_id
+                data['student_info_id'] = student_info_id
         elif param is None:
             param = 'project_name'
         if param:
             param = param.replace(f"click_class", '').replace(f'_{studentid}', '')
-            data[studentid][param] = value
+            data[param] = value
+        return data
 
-    def sync_student_files_from_stem_wizard(self, studentid, student_local_dir, studentdata, download,
-                                            force_file_detail_fetch):
-        used_cache = False
-        if studentdata['stud_com_status'] != 'Complete' or force_file_detail_fetch:
-            self.logger.debug(
-                f"making AJAX call for finfo for {studentid} {studentdata['f_name']} {studentdata['l_name']}")
-            studentdata['files'] = self.student_file_detail(studentid, studentdata['student_info_id'])
-        if download:
-            for documenttype, filedata in studentdata['files'].items():
-                print(f"    {documenttype} {filedata['file_name']}")
-                if filedata['file_name'] == 'NONE':
-                    continue
-                local_full_path = f"{student_local_dir}/{filedata['file_name']}"
-                if os.path.exists(local_full_path):
-                    localmtime = datetime.fromtimestamp(os.path.getmtime(local_full_path))
-                    download = localmtime < filedata['updated_on'] and download
-                download = download and filedata['file_status'] in ['SUBMITTED', 'APPROVED']
-                if download:
-                    full_pathname, used_cache = None, None
-                    if filedata['file_name'] is None or len(filedata['file_name']) < 5:
-                        self.logger.debug(f"{documenttype} not uploaded yet by student {studentid}")
-                        continue
-                    if filedata['uploaded_file_name'] is not None:
-                        full_pathname, used_cache = self.DownloadFileFromSTEMWizard(filedata['file_name'],
-                                                                                    filedata['uploaded_file_name'],
-                                                                                    f"{studentid}")
-                    elif filedata['uploaded_file_name'] is None:
-                        try:
-                            full_pathname, used_cache = self.DownloadFileFromS3Bucket(filedata['file_url'],
-                                                                                      f"{studentid}",
-                                                                                      filedata['file_name'])
-                        except Exception as e:
-                            print('-' * 30)
-                            print(f"sync_student_files_from_stem_wizard error: {e}")
-                            pprint(filedata)
-                            print('-' * 30)
-                            raise
-                    else:
-                        self.logger.error(f"could not determine download for student {studentid} {documenttype}")
-
-            if not used_cache:
-                self.sync_student_files_to_google_drive(studentdata, studentid)
-
-    def student_file_detail(self, studentId, info_id ):
+    def student_file_detail(self, studentId, info_id):
         self.logger.debug(f"getting file details for {studentId}")
         self.get_csrf_token()
         url = f'{self.url_base}/filesAndForms/studentFormsAndFilesDetailedView'
@@ -742,16 +781,14 @@ class STEMWizardAPI(object):
             return
         return self.download_to_local_file_path(local_dir, original_file, parent_dir, rf)
 
-    def sync_student_files_to_google_drive(self, node, studentid):
+    def sync_student_files_to_google_drive(self, studentid, filedata):
         # Creating a folder for each student and uploading the files to that folder.
-        for formname, formdata in node['files'].items():
+        for formname, formdata in filedata.items():
             if formdata['file_name'] == 'NONE':
                 continue
             remote_dir = f"/Automation/{self.domain}/by internal id/{studentid}"
             self.googleapi.create_folder(remote_dir)
             localpath = f"{self.parent_file_dir}/{self.domain}/{studentid}/{formdata['file_name']}"
             remotepath = f"{remote_dir}/{formdata['file_name']}"
-            # if 'ISEF 3' == formname:
-            #     pass
-            self.googleapi.create_file(localpath, remotepath)
+            jkl = self.googleapi.create_file(localpath, remotepath)
             self.logger.info(f"uploaded to {remotepath}")

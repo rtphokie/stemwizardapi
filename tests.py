@@ -120,88 +120,9 @@ class GoogleDriveSyncTestCases(unittest.TestCase):
         print(f"targetMimeType: {shortcut.get('targetMimeType')}")
 
 
-class NCRegTestTestCases(unittest.TestCase):
-
-    def test_setcolumns(self):
-        # results are not really testable in this context, so looking for exceptions here
-        uut = STEMWizardAPI(configfile=configfile)
-        for listname in ['judge', 'student', 'volunteer']:
-            uut.set_columns(listname=listname)
-
-    def test_login(self):
-        uut = STEMWizardAPI(configfile=configfile)
-        self.assertTrue(uut.authenticated)
-        self.assertEqual(40, len(uut.token))
-        self.assertGreaterEqual(len(uut.domain), 4)
-        self.assertGreaterEqual(int(uut.region_id), 4000)
-
-    def test_student_xls(self):
-        uut = STEMWizardAPI(configfile=configfile)
-        filename, df = uut.export_list('student')
-        print(filename)
-        self.assertGreater(len(filename), 30)
-        self.assertTrue(os.path.exists(filename))
-        self.assertGreaterEqual(df.shape[0], 3, 'fewer students than expected')
-        self.assertGreaterEqual(df.shape[1], 33, 'fewer columns than expected')
-
-    def test_judge_xls_prod(self):
-        uut = STEMWizardAPI(configfile=configfile_prod)
-        filename, df = uut.export_list('judge')
-        # print(df)
-        self.assertGreater(len(filename), 20)
-        self.assertTrue(os.path.exists(filename))
-        self.assertGreaterEqual(df.shape[0], 1, 'fewer judges than expected')
-        self.assertGreaterEqual(df.shape[1], 26, 'fewer columns than expected')
-
-    def test_judge_xls(self):
-        uut = STEMWizardAPI(configfile=configfile)
-        filename, df = uut.export_list('judge')
-        print(df)
-        # self.assertGreater(len(filename), 30)
-        # self.assertTrue(os.path.exists(filename))
-        # self.assertGreaterEqual(df.shape[0], 1, 'fewer judges than expected')
-        # self.assertGreaterEqual(df.shape[1], 26, 'fewer columns than expected')
-
-    def test_volunteer_xls(self):
-        uut = STEMWizardAPI(configfile=configfile)
-        filename, df = uut.export_list('volunteer')
-        self.assertGreater(len(filename), 30)
-        self.assertTrue(os.path.exists(filename))
-        self.assertGreaterEqual(df.shape[0], 1, 'fewer volunteer than expected')
-        self.assertGreaterEqual(df.shape[1], 14, 'fewer columns than expected')
-
-    def test_student_data(self):
-        uut = STEMWizardAPI(configfile=configfile)
-
-        data = uut.getStudentData_by_category(fileinfo=True, download=True)
-        pprint(data)
-        return
-        for id, node in data.items():
-            uut.googleapi.create_folder(f"/Automation/{uut.domain}/by internal id/{id}")
-            for formname, formdata in node['files'].items():
-                uut.googleapi.create_folder(f"/Automation/{uut.domain}/by internal id/{id}/{formname}")
-                # print(formname, formdata['file_name'])
-                localpath = f"files/{id}/{formname}/{formdata['file_name']}"
-                remotepath = f"/Automation/{uut.domain}/by internal id/{id}/{formname}/{formdata['file_name']}"
-                uut.googleapi.create_file(localpath, remotepath)
-
-            # uut.googleapi.create_file()
-        self.assertGreaterEqual(len(data), 3)
-        self.assertGreaterEqual(len(data[list(data.keys())[0]]['files']), 5)
-
-    def test_file_detail(self):
-        uut = STEMWizardAPI(configfile=configfile)
-        data = uut.student_file_detail(53240, 61630)
-        self.assertGreaterEqual(len(data), 3)
-
-    def test_export(self):
-        uut = STEMWizardAPI(configfile=configfile)
-        filename, df = uut.export_list(listname='judge')
-
-
 class NCSEF_prod_TestCases_operation(unittest.TestCase):
 
-    def test_01_setcolumns(self):
+    def dtest_01_setcolumns(self):
         # results are not really testable in this context, so looking for exceptions here
         uut = STEMWizardAPI(configfile=configfile_prod)
         for listname in ['judge', 'student', 'volunteer']:
@@ -251,6 +172,65 @@ class NCSEF_prod_TestCases_operation(unittest.TestCase):
         self.assertGreaterEqual(df.shape[0], 1, 'fewer volunteer than expected')
         self.assertGreaterEqual(df.shape[1], 14, 'fewer columns than expected')
         print(f"Volunteers: {df.shape[0]}")
+
+    def test_judge_xls2(self):
+        uut = STEMWizardAPI(configfile=configfile_prod)
+        uut.generate_all_data_report('student')
+
+
+class devtest(unittest.TestCase):
+    def test_google_clean_empty_dirs(self):
+        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False)
+        parentid = '1wiIOz_ZdPHoOBNjJcb1HX-L2NqX5urQx'
+        ids = set()
+        for id, data in uut.googleapi.ids.items():
+            if 'folder' not in data['mimeType']:
+                continue
+            if len(data['parents']) < 1:
+                continue
+            if data['parents'][0]['id'] != parentid:
+                continue  # not in by internal id
+            print(data['title'])
+            if data['labels']['trashed']:
+                pprint(data)
+                raise
+            ids.add(id)
+        print('--' * 20)
+        print(len(ids))
+        from tqdm import tqdm
+        for id in tqdm(ids):
+            item = uut.googleapi.drive.CreateFile({'id': data['id']})
+            item.Trash()
+
+    def test_min_forms(self):
+        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False, login_google=False)
+        data_cache = uut.getStudentData_by_category()
+        min = {'ISEF 1', 'ISEF 1a', '2022 NCSEF Abstract Form', 'Research Plan', 'ISEF 1b',
+               '2022 NCSEF Participant Signature Page'}
+
+        for sid, data in data_cache.items():
+            missing=min-set(data['files'].keys())
+            print(sid, missing)
+            if len(missing) ==0:
+                src = f'../files/ncsef/{sid}'
+                dst = f"links/{data['l_name']},{data['f_name']}"
+                os.symlink(src, dst)
+
+    def test_trashed(self):
+        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False)
+        pprint(uut.googleapi.ids['1s9FHLsSeTGJat8qNjIjL2K8zS41VNT9Q'])
+        # 1s9FHLsSeTGJat8qNjIjL2K8zS41VNT9Q 58171
+
+    # 1gbq76PiRZykUP3MzRgMoXoZ101CZV7CL 56098
+    # 1EoL06eT-e8egvAZ0G1Kxchd_sLqcelg4 56098
+    # 1gcYQwyjPH0k0qOqK5nkwsa0ulWLTv7Sj 56098
+    # 1qkyVhUv6c2VW_yOXi6wLTB5ySAlC9d8e 56098
+    # 15cxytgSbIAs_nvS_t6b2cH1Z666_IIm- 5609
+
+    def dtest1(self):
+        from tqdm import tqdm
+        data_cache = self.getStudentData_by_category()
+        # for sid, data in data_cache.items():
 
 
 class NCSEF_prod_TestCases(unittest.TestCase):

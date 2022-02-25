@@ -12,6 +12,7 @@ import json
 import os
 from dateutil import parser
 import pytz
+from tqdm import tqdm
 
 logger = get_logger('google')
 
@@ -205,13 +206,15 @@ class NCSEFGoogleDrive(object):
                                     "targetMimeType": 'application/vnd.google-apps.folder'}
             }
             shortcut = self.drive.CreateFile(shortcut_metadata)
-            shortcut.Upload()
+            try:
+                shortcut.Upload()
+            except Exception as e:
+                logger.error(f"error creating link to  {fullpath_link_to} in {folder_to_put_link_in} as {title}")
+
         return shortcut
 
     def create_file(self, localpath, remotepath, mimeType='application/vnd.google-apps.file', update_on='newer'):
         nodeid, parentid, parentpath, title, isafolder = self._find_file(remotepath)
-        # if not nodeid or (nodeid and update_on in ['always', 'newer']):
-        # Google returns timezone aware UTC ISO8601 dates
         upload = None
         if nodeid and update_on == 'newer':
             remotemtime = parser.parse(self.ids[nodeid]['modifiedDate'])
@@ -239,23 +242,26 @@ class NCSEFGoogleDrive(object):
             metadata = {"title": title, "parents": [{"id": parentid}], "mimeType": mimeType}
             item = self.drive.CreateFile(metadata)
             item.SetContentFile(localpath)
-            item.Upload()
+            try:
+                item.Upload()
+            except:
+                print(localpath)
+                pprint(metadata)
+
             logger.info(f'created {remotepath}')
         elif update_on == 'newer' and localmtime < remotemtime:
             logger.info(f'no update needed for {remotepath}')
         else:
             logger.error('create_file unknown error')
 
-        # elif nodeid and update_on not in ['always', 'newer']:
-        #     logger.info(f'skipping update for existing {remotepath}')
-
     def create_folder(self, full_remote_path, expectedroot='Automation', refresh=False):
         item = {}
         nodeid, parentid, parentpath, title, isafolder = self._find_file(full_remote_path)
-        if isafolder:
-            logger.warning(f"folder {full_remote_path} already exists")
-        elif nodeid and not isafolder:
+        if nodeid and not isafolder:
             logger.error(f"{full_remote_path} already exists as a non-folder")
+        elif nodeid:
+            metadata = {"title": title, "parents": [{"id": parentid}], 'id': id}
+            return metadata
         else:
             elements = full_remote_path.split('/')
             parentpath = '/'.join(elements[:-1])
@@ -279,6 +285,41 @@ class NCSEFGoogleDrive(object):
             if refresh:
                 self.list_all(cache_update_ttl=0)
         return item
+
+    def clean_empty_dirs(self, parentid='1wiIOz_ZdPHoOBNjJcb1HX-L2NqX5urQx'):
+        ids = set()
+        for id, data in self.ids.items():
+            if 'folder' not in data['mimeType']:
+                continue
+            if len(data['parents']) == 0:
+                continue
+            if data['parents'][0]['id'] != parentid:
+                continue
+            if len(data['children']) > 0:
+                continue
+            ids.add(id)
+        for id in tqdm(ids):
+            item = self.drive.CreateFile({'id': data['id']})
+            item.Trash()
+
+    def clean_single_file_dirs(self, parentid='1wiIOz_ZdPHoOBNjJcb1HX-L2NqX5urQx'):
+        idstopurge = set()
+        for id, data in tqdm(self.ids.items()):
+            if 'folder' not in data['mimeType']:
+                continue
+            if len(data['parents']) == 0:
+                continue
+            if data['parents'][0]['id'] != parentid:
+                continue
+            if len(data['children']) > 1:
+                continue
+            print(id, data['title'])
+            idstopurge.add(id)
+        for id in tqdm(idstopurge):
+            if id == parentid:
+                raise ValueError('no not this one')
+            item = self.drive.CreateFile({'id': data['id']})
+            item.Trash()
 
 
 def get_sheet(sheetname):
