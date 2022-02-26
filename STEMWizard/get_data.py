@@ -134,9 +134,16 @@ def sync_students_to_google_drive(self, data_cache):
 
 
 def download_student_files_locally(self, data_cache):
+    updated_student_data={}
     for studentid, data_student in tqdm(data_cache.items(), desc='sync files locally'):
         # download those files and forms as necessary
-        data_student_files_updated = self.download_files_locally(studentid, data_student['files'])
+        updated_student_data[studentid] = self.download_files_locally(studentid, data_student['files'])
+    for studentid, filedata in updated_student_data.items():
+        data_cache[studentid]['files']=filedata
+    return data_cache
+
+
+
 
 
 def student_folder_links(self, data_cache):
@@ -434,19 +441,19 @@ def export_list(self, listname, purge_file=False):
             print(f'failed to remove {filename_local} {e}')
     return (filename_local, df)
 
-def download_files_locally(self, studentid, passed_filedata):
-    filedata = passed_filedata.copy()
+def download_files_locally(self, studentid, passedfiledata):
+    filedata = passedfiledata.copy()
     student_local_dir = f"{self.parent_file_dir}/{self.region_domain}/{studentid}"
-    for documenttype, this_file_data in filedata.items():
+    for documenttype, this_file_data in passedfiledata.items():
         download = None
         if this_file_data['file_name'] == 'NONE':
             continue
         atoms=this_file_data['file_name'].split('.')
         documenttypefortilename = simplify_filenames(documenttype)
-        if 'abstract' in documenttypefortilename:
-            documenttypefortilename='abstract'
         local_filename = f"{documenttypefortilename}.{atoms[-1]}"
         local_full_path = f"{student_local_dir}/{local_filename}"
+        filedata['file_name']=local_filename
+        filedata['local_full_path']=local_full_path
         this_file_data['local_full_path'] = local_full_path
         if os.path.exists(local_full_path):
             localmtime = datetime.fromtimestamp(os.path.getmtime(local_full_path))
@@ -492,6 +499,10 @@ def download_files_locally(self, studentid, passed_filedata):
 
 def simplify_filenames(documenttype):
     documenttypefortilename = documenttype
+    if 'plan' in documenttypefortilename.lower():
+        documenttypefortilename = 'Research Plan'
+    if 'abstract' in documenttypefortilename.lower():
+        documenttypefortilename = 'Abstract'
     documenttypefortilename = documenttypefortilename.replace('2022_NCSEF_', '')
     documenttypefortilename = documenttypefortilename.replace('2022 NCSEF ', '')
     documenttypefortilename = documenttypefortilename.replace('Form_', '')

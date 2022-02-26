@@ -14,7 +14,7 @@ pd.set_option('display.max_columns', None)
 class STEMWizardAPI(object):
     from .get_data import getStudentData_by_category, student_folder_links, download_student_files_locally, download_files_locally, DownloadFileFromS3Bucket, DownloadFileFromSTEMWizard, _download_to_local_file_path, analyze_student_data, student_file_info
 
-    from .fileutils import read_config
+    from .fileutils import read_config, write_json_cache, read_json_cache
     from .utils import get_region_info, get_csrf_token
 
     def __init__(self, configfile='stemwizardapi.yaml', login_stemwizard=True, login_google=True):
@@ -93,8 +93,7 @@ class STEMWizardAPI(object):
         data_cache = self.getStudentData_by_category()
         data_cache = self.student_file_info(data_cache, cache_file_name)
         self.student_folder_links(data_cache)
-        for studentid, data_student in tqdm(data_cache.items(), desc='sync files locally'):
-            data_student_files_updated = self.download_files_locally(studentid, data_student['files'])
+        data_cache=self.download_student_files_locally(data_cache)
         # self.sync_students_to_google_drive(data_cache)
-        # self._write_to_cache(data_cache, cache_file_name)
+        write_json_cache(data_cache, cache_file_name)
         return data_cache
