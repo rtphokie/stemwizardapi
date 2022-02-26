@@ -1,5 +1,8 @@
 import unittest
 from pprint import pprint
+
+import pandas as pd
+
 from STEMWizard import STEMWizardAPI, google_sync
 from STEMWizard.google_sync import NCSEFGoogleDrive
 import os
@@ -181,15 +184,25 @@ class NCSEF_prod_TestCases_operation(unittest.TestCase):
 class devtest(unittest.TestCase):
     def test_ggetCustomFiles(self):
         uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
-        uut.DownloadFileFromSTEMWizard('UP UP and AWAY_1644707023.pptx',
-                                       'UP UP and AWAY_1644707023.pptx',
-                                       '.',
-                                       remotedir='images/milestone_uploads',
-                                       referer='studentmilestonereport/region/3153/15257'
-                                       )
+        # uut.getCustomFiles()
+        uut.download_custom_files()
+        # uut.DownloadFileFromSTEMWizard('UP UP and AWAY_1644707023.pptx',
+        #                                'UP UP and AWAY_1644707023.pptx',
+        #                                '.',
+        #                                remotedir='images/milestone_uploads',
+        #                                referer='studentmilestonereport/region/3153/15257'
+        #                                )
         # uut.getCustomFiles()
 
-    def test_google_clean_empty_dirs(self):
+    def test_foo(self):
+        local_filename = '/tmp/CustomMilestoneDetailView.xls'
+        import olefile
+
+        ole = olefile.OleFileIO(local_filename)
+        df = pd.read_excel(ole.openstream('Workbook'), engine='xlrd')
+        print(df)
+
+    def dtest_google_clean_empty_dirs(self):
         uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False)
         parentid = '1wiIOz_ZdPHoOBNjJcb1HX-L2NqX5urQx'
         ids = set()
@@ -212,49 +225,19 @@ class devtest(unittest.TestCase):
             item = uut.googleapi.drive.CreateFile({'id': data['id']})
             item.Trash()
 
-    def test_min_forms(self):
-        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False, login_google=False)
-        data_cache = uut.getStudentData_by_category()
-        min = {'ISEF 1', 'ISEF 1a', '2022 NCSEF Abstract Form', 'Research Plan', 'ISEF 1b',
-               '2022 NCSEF Participant Signature Page'}
-
-        for sid, data in data_cache.items():
-            missing = min - set(data['files'].keys())
-            print(sid, missing)
-            if len(missing) == 0:
-                src = f'../files/ncsef/{sid}'
-                dst = f"links/{data['l_name']},{data['f_name']}"
-                os.symlink(src, dst)
-
-    def test_trashed(self):
-        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False)
-        pprint(uut.googleapi.ids['1s9FHLsSeTGJat8qNjIjL2K8zS41VNT9Q'])
-        # 1s9FHLsSeTGJat8qNjIjL2K8zS41VNT9Q 58171
-
-    # 1gbq76PiRZykUP3MzRgMoXoZ101CZV7CL 56098
-    # 1EoL06eT-e8egvAZ0G1Kxchd_sLqcelg4 56098
-    # 1gcYQwyjPH0k0qOqK5nkwsa0ulWLTv7Sj 56098
-    # 1qkyVhUv6c2VW_yOXi6wLTB5ySAlC9d8e 56098
-    # 15cxytgSbIAs_nvS_t6b2cH1Z666_IIm- 5609
-
-    def dtest1(self):
-        from tqdm import tqdm
-        data_cache = self.getStudentData_by_category()
-        # for sid, data in data_cache.items():
-
 
 class NCSEF_prod_TestCases(unittest.TestCase):
 
     def test_student_data(self):
         uut = STEMWizardAPI(configfile=configfile_prod)
-        data = uut.getStudentData()
+        data = uut.syncStudents()
         print(len(data))
 
     def dtest_sync_to_google_drive(self):
         uut = STEMWizardAPI(configfile=configfile_prod)
 
         cache_filename = 'student_data_cache.json'
-        cache = uut._read_cache(cache_filename, 6000)
+        cache = uut.read_json_cache(cache_filename, 6000)
         pprint(cache.keys())
         uut.sync_student_files_to_google_drive(cache['57344'], 57344)
         # 57344

@@ -1,0 +1,70 @@
+from pprint import pprint
+import json
+import olefile
+import pandas as pd
+import time
+import yaml
+import os
+from .logstuff import get_logger
+
+headers = {
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36'}
+
+logger = get_logger('cache_json')
+
+
+def read_config(self, configfile):
+    """
+    reads named yaml configuration file
+    :param configfile: (defaulted to stemwizardapi.yaml above)
+    :return: nothing, updates username, password and token attribuates on the object
+    """
+    fp = open(configfile, 'r')
+    data_loaded = yaml.safe_load(fp)
+    self.domain = data_loaded['domain']
+    self.username = data_loaded['username']
+    self.password = data_loaded['password']
+    fp.close()
+
+
+def write_json_cache(cache, cache_filename):
+    fp = open(cache_filename, 'w')
+    json.dump(cache, fp, indent=2, default=str)
+    fp.close()
+    logger.debug(f"wrote to {cache_filename}")
+
+
+def read_json_cache(cache_filename, max_cache_age=600):
+    try:
+        if os.path.isfile(cache_filename):
+            st = os.stat(cache_filename)
+            age = (time.time() - st.st_mtime)
+        else:
+            logger.debug(f"could not read a {cache_filename}")
+            age = 999999999999999
+        if age < max_cache_age:
+            fp = open(cache_filename, 'r')
+            cache = json.loads(fp.read())
+            fp.close()
+            logger.debug(f"read {round(age,1)} min old {cache_filename}")
+        else:
+            logger.debug(f"{round(age,1)} min old {cache_filename} needs to be recreated")
+            cache = {}
+    except Exception as e:
+        print(e)
+        logger.error(e)
+        cache = {}
+    return cache
+
+
+def xlsfile_to_df(local_filename):
+    ole = olefile.OleFileIO(local_filename)
+    df = pd.read_excel(ole.openstream('Workbook'), engine='xlrd')
+    return df
+
+
+def safe_rm_file(local_filename):
+    try:
+        os.remove(local_filename)
+    except OSError as e:
+        print(f'failed to remove {local_filename} {e}')
