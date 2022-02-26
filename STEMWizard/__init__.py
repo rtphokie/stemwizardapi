@@ -12,7 +12,8 @@ pd.set_option('display.max_columns', None)
 
 
 class STEMWizardAPI(object):
-    from .get_data import getStudentData_by_category, student_folder_links, download_student_files_locally, download_files_locally, DownloadFileFromS3Bucket, DownloadFileFromSTEMWizard, _download_to_local_file_path
+    from .get_data import getStudentData_by_category, student_folder_links, download_student_files_locally, download_files_locally, DownloadFileFromS3Bucket, DownloadFileFromSTEMWizard, _download_to_local_file_path, analyze_student_data, student_file_info
+
     from .fileutils import read_config
     from .utils import get_region_info, get_csrf_token
 
@@ -87,34 +88,13 @@ class STEMWizardAPI(object):
 
         return authenticated
 
-    def analyze_student_data(self, data_cache):
-        idstofetchfiledetailfor = set()
-        for studentid, data_student in tqdm(data_cache.items(), desc='student json'):
-            student_local_dir = f"files/{self.region_domain}/{studentid}"
-            os.makedirs(student_local_dir, exist_ok=True)
-            jsonfilename = f"{student_local_dir}/{data_student['l_name']},{data_student['f_name']}.json"
-            jsonfilename = jsonfilename.replace("\n", ',')
-            jsonfilename = jsonfilename.replace("  ", '')
-            jsonfilename = jsonfilename.replace(" ", '')
-            write_json_cache(data_student, jsonfilename)
-            if len(data_student['files']) == 0:
-                idstofetchfiledetailfor.add(studentid)
-        return idstofetchfiledetailfor
-
-    def student_file_info(self, data_cache, cache_file_name):
-        idstofetchfiledetailfor = self.analyze_student_data(data_cache)
-        for studentid in tqdm(idstofetchfiledetailfor, 'student file data'):
-            data_cache[studentid]['files'] = self.student_file_detail(studentid,
-                                                                      data_cache[studentid]['student_info_id'])
-        write_json_cache(data_cache, cache_file_name)
-        return data_cache
-
     def syncStudents(self, cache_file_name='caches/studentData.json'):
         # get basic data about students, names, school, overall approval status
         data_cache = self.getStudentData_by_category()
         data_cache = self.student_file_info(data_cache, cache_file_name)
         self.student_folder_links(data_cache)
-        self.download_student_files_locally(data_cache)
+        for studentid, data_student in tqdm(data_cache.items(), desc='sync files locally'):
+            data_student_files_updated = self.download_files_locally(studentid, data_student['files'])
         # self.sync_students_to_google_drive(data_cache)
         # self._write_to_cache(data_cache, cache_file_name)
         return data_cache

@@ -12,14 +12,12 @@ from .fileutils import read_json_cache, write_json_cache
 
 
 def DownloadFileFromS3Bucket(self, url, local_dir, local_filename, parent_dir=f'files'):
-    self.logger.debug(f"DownloadFileFromS3Bucket: downloading {url} to {local_dir} as {local_filename} from S3")
+    # self.logger.debug(f"DownloadFileFromS3Bucket: downloading {url} to {local_dir} as {local_filename} from S3")
     r = self.session.get(url)
 
     if r.status_code >= 300:
         self.logger.error(f"status code {r.status_code} on post to {url}")
         return
-    else:
-        self.logger.debug(f"status code {r.status_code} on post to {url}")
 
     return self._download_to_local_file_path(local_dir, local_filename, parent_dir, r)
 
@@ -282,7 +280,7 @@ def _download_to_local_file_path(self, local_dir, local_filename, parent_dir, r,
     target_dir = f"{parent_dir}/{self.region_domain}/{local_dir}"
     full_pathname = f"{target_dir}/{local_filename}"
     used_cache = None
-    if not os.path.isfile(full_pathname) or True:
+    if not os.path.isfile(full_pathname):
         os.makedirs(target_dir, exist_ok=True)
         if r.status_code >= 300:
             raise Exception(f'{r.status_code}')
@@ -294,7 +292,7 @@ def _download_to_local_file_path(self, local_dir, local_filename, parent_dir, r,
                 if chunk:  # filter out keep-alive new chunks
                     f.write(chunk)
             f.close()
-            self.logger.info(f"download_to_local_file_path: downloaded to {full_pathname} forced {force_download}")
+            self.logger.info(f"download_to_local_file_path: downloaded to {full_pathname}")
             used_cache = False
     else:
         used_cache = True
@@ -444,7 +442,10 @@ def download_files_locally(self, studentid, passed_filedata):
         if this_file_data['file_name'] == 'NONE':
             continue
         atoms=this_file_data['file_name'].split('.')
-        local_filename = f"{documenttype}.{atoms[-1]}"
+        documenttypefortilename = simplify_filenames(documenttype)
+        if 'abstract' in documenttypefortilename:
+            documenttypefortilename='abstract'
+        local_filename = f"{documenttypefortilename}.{atoms[-1]}"
         local_full_path = f"{student_local_dir}/{local_filename}"
         this_file_data['local_full_path'] = local_full_path
         if os.path.exists(local_full_path):
@@ -461,18 +462,20 @@ def download_files_locally(self, studentid, passed_filedata):
         else:
             download = True
         download = download and this_file_data['file_status'] in ['SUBMITTED', 'APPROVED']
+        dld = os.path.isfile(local_full_path)
+        download = download and not os.path.isfile(local_full_path)
         if download:
             if this_file_data['file_name'] is None or len(this_file_data['file_name']) < 5:
                 self.logger.debug(f"{documenttype} not uploaded yet by student {studentid}")
                 continue
             if this_file_data['uploaded_file_name'] is not None:
+                thatdata=this_file_data
                 full_pathname, used_cache = self.DownloadFileFromSTEMWizard(this_file_data['file_name'],
                                                                             this_file_data['uploaded_file_name'],
                                                                             f"{studentid}", local_filename)
             elif this_file_data['uploaded_file_name'] is None:
                 full_pathname, used_cache = self.DownloadFileFromS3Bucket(this_file_data['file_url'],
-                                                                           f"{studentid}",
-                                                                          this_file_data['file_name'])
+                                                                           f"{studentid}",local_filename)
             else:
                 self.logger.error(f"could not determine download for student {studentid} {documenttype}")
             if os.path.exists(local_full_path):
@@ -480,5 +483,42 @@ def download_files_locally(self, studentid, passed_filedata):
                 this_file_data['local_mtime'] = localmtime
             else:
                 this_file_data['local_mtime'] = None
+        elif os.path.isfile(local_full_path):
+            self.logger.info(f"skipping {local_full_path}")
+
+
     return filedata
 
+
+def simplify_filenames(documenttype):
+    documenttypefortilename = documenttype
+    documenttypefortilename = documenttypefortilename.replace('2022_NCSEF_', '')
+    documenttypefortilename = documenttypefortilename.replace('2022 NCSEF ', '')
+    documenttypefortilename = documenttypefortilename.replace('Form_', '')
+    documenttypefortilename = documenttypefortilename.replace(' Form', '')
+    documenttypefortilename = documenttypefortilename.replace('FORM', '')
+    documenttypefortilename = documenttypefortilename.replace('Science Fair -', '')
+    return documenttypefortilename
+
+
+def analyze_student_data(self, data_cache):
+    idstofetchfiledetailfor = set()
+    for studentid, data_student in tqdm(data_cache.items(), desc='student json'):
+        student_local_dir = f"files/{self.region_domain}/{studentid}"
+        os.makedirs(student_local_dir, exist_ok=True)
+        jsonfilename = f"{student_local_dir}/{data_student['l_name']},{data_student['f_name']}.json"
+        jsonfilename = jsonfilename.replace("\n", ',')
+        jsonfilename = jsonfilename.replace("  ", '')
+        jsonfilename = jsonfilename.replace(" ", '')
+        write_json_cache(data_student, jsonfilename)
+        if len(data_student['files']) == 0:
+            idstofetchfiledetailfor.add(studentid)
+    return idstofetchfiledetailfor
+
+def student_file_info(self, data_cache, cache_file_name):
+    idstofetchfiledetailfor = self.analyze_student_data(data_cache)
+    for studentid in tqdm(idstofetchfiledetailfor, 'student file data'):
+        data_cache[studentid]['files'] = self.student_file_detail(studentid,
+                                                                  data_cache[studentid]['student_info_id'])
+    write_json_cache(data_cache, cache_file_name)
+    return data_cache

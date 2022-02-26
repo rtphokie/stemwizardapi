@@ -1,3 +1,14 @@
+**/.DS_Store
+**/*.doc
+**/*.doc
+**/*.pdf
+**/*.docx`
+**/*.xls
+**/*.xlsx
+ __initold__.py
+        interesting_ids.py
+
+
 **.log
 **.log.[0-9]**
 **.sqlite
@@ -11,3 +22,5 @@ old/
 *.yaml
 venv/
 /foo.txt
+/STEMWizard/interesting_ids.py
+/STEMWizard/__initold__.py
