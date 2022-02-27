@@ -14,7 +14,7 @@ pd.set_option('display.max_columns', None)
 class STEMWizardAPI(object):
     from .get_data import getStudentData_by_category, student_folder_links, download_student_files_locally, \
         download_files_locally, DownloadFileFromS3Bucket, DownloadFileFromSTEMWizard, _download_to_local_file_path, \
-        analyze_student_data, student_file_info, getFormInfo, process_student_data_row
+        analyze_student_data, student_file_info, getFormInfo, process_student_data_row, student_file_detail
     from .fileutils import read_config, write_json_cache, read_json_cache
     from .utils import get_region_info, get_csrf_token, _getStudentData, _extractStudentID
 

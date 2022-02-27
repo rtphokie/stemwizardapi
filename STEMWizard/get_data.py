@@ -175,7 +175,7 @@ def getStudentData_by_category(self):
             data.update(newdata)
             pbar.update(1)
             self.logger.info(f"got StudentData for {len(newdata)} students in category {category_title}")
-        self._write_to_cache(data, cache_file_name)
+        write_json_cache(data, cache_file_name)
     return data
 
 
@@ -200,84 +200,84 @@ def process_student_data_row(self, cell, studentid):
         data[param] = value
     return data
 
-    def student_file_detail(self, studentId, info_id):
-        self.logger.debug(f"getting file details for {studentId}")
-        self.get_csrf_token()
-        url = f'{self.url_base}/filesAndForms/studentFormsAndFilesDetailedView'
-        payload = {'studentId': studentId, 'info_id': info_id}
+def student_file_detail(self, studentId, info_id):
+    self.logger.debug(f"getting file details for {studentId}")
+    self.get_csrf_token()
+    url = f'{self.url_base}/filesAndForms/studentFormsAndFilesDetailedView'
+    payload = {'studentId': studentId, 'info_id': info_id}
 
-        headers['X-CSRF-TOKEN'] = self.csrf
-        headers['Referer'] = f'{self.url_base}/filesAndForms'
-        headers['X-Requested-With'] = 'XMLHttpRequest'
-        rfaf = self.session.post(url, data=payload, headers=headers)
-        if rfaf.status_code >= 300:
-            self.logger.error(f"status code {rfaf.status_code} on post to {url}")
-            return
-        fp = open('foo.html', 'w')
-        fp.write(rfaf.text)
-        fp.close()
+    headers['X-CSRF-TOKEN'] = self.csrf
+    headers['Referer'] = f'{self.url_base}/filesAndForms'
+    headers['X-Requested-With'] = 'XMLHttpRequest'
+    rfaf = self.session.post(url, data=payload, headers=headers)
+    if rfaf.status_code >= 300:
+        self.logger.error(f"status code {rfaf.status_code} on post to {url}")
+        return
+    fp = open('foo.html', 'w')
+    fp.write(rfaf.text)
+    fp.close()
 
-        soup = BeautifulSoup(rfaf.text, 'html.parser')
-        table = soup.find('table')
-        rows = table.find_all('tr')
-        data = {}
-        params = []
-        thead = table.find('thead')
-        if thead is None:
-            raise Exception('student table not found on files and Forms page')
-        else:
-            cells = thead.find_all('th')
-        for cell in cells:
-            params.append(cell.text.strip().lower().replace(' ', '_'))
-        for row in rows[1:]:
-            cells = row.find_all('td')
-            for n, cell in enumerate(cells):
-                # 0 type, 1 name, 2 status, 3 approved by, 4 approved dat, 5 updated by, 6 approval status
-                value = None
-                if n == 0:
-                    filetype = cell.text.strip()
-                    if 'Research Plan' in filetype:
-                        filetype = 'Research Plan'  # clean up Research Plan filetype
-                    data[filetype] = {'file_url': None,
-                                      'file_status': None,
-                                      'updated_on': None,
-                                      'updated_by': None,
-                                      'approved_on': None,
-                                      'approved_by': None,
-                                      'uploaded_file_name': None,
-                                      'file_name': None}
-                elif n == 1:
-                    # get download link from 2nd column
-                    linkele = cell.find('a', {'class': 'downloadProjStudent'})
-                    if linkele:
-                        data[filetype]['file_url'] = linkele.get('uploaddocname')
-                    else:
-                        linkele = cell.find('a', {'class': 'file_download'})
-                        if linkele:
-                            data[filetype]['uploaded_file_name'] = linkele.get('uploaded_file_name')
-                    value = cell.text.strip()
-                elif n == 4:
-                    divele = cell.find('div')
-                    if divele:
-                        approved_by, approved_on = divele.encode_contents().decode('utf-8').split('<br/>')
-                        data[filetype]['approved_by'] = approved_by.replace("b'", "")
-                        try:
-                            data[filetype]['approved_on'] = parser.parse(approved_on)
-                        except:
-                            data[filetype]['approved_on'] = approved_on
-                elif n == 5:
-                    updated_by, updated_on = cell.find('div').encode_contents().decode('utf-8').split('<br/>')
-                    data[filetype]['updated_by'] = updated_by.replace("b'", "")
-                    try:
-                        data[filetype]['updated_on'] = parser.parse(updated_on)
-                    except:
-                        data[filetype]['updated_on'] = updated_on
+    soup = BeautifulSoup(rfaf.text, 'html.parser')
+    table = soup.find('table')
+    rows = table.find_all('tr')
+    data = {}
+    params = []
+    thead = table.find('thead')
+    if thead is None:
+        raise Exception('student table not found on files and Forms page')
+    else:
+        cells = thead.find_all('th')
+    for cell in cells:
+        params.append(cell.text.strip().lower().replace(' ', '_'))
+    for row in rows[1:]:
+        cells = row.find_all('td')
+        for n, cell in enumerate(cells):
+            # 0 type, 1 name, 2 status, 3 approved by, 4 approved dat, 5 updated by, 6 approval status
+            value = None
+            if n == 0:
+                filetype = cell.text.strip()
+                if 'Research Plan' in filetype:
+                    filetype = 'Research Plan'  # clean up Research Plan filetype
+                data[filetype] = {'file_url': None,
+                                  'file_status': None,
+                                  'updated_on': None,
+                                  'updated_by': None,
+                                  'approved_on': None,
+                                  'approved_by': None,
+                                  'uploaded_file_name': None,
+                                  'file_name': None}
+            elif n == 1:
+                # get download link from 2nd column
+                linkele = cell.find('a', {'class': 'downloadProjStudent'})
+                if linkele:
+                    data[filetype]['file_url'] = linkele.get('uploaddocname')
                 else:
-                    value = cell.text.strip()
-                if value is not None:
-                    data[filetype][params[n]] = value
+                    linkele = cell.find('a', {'class': 'file_download'})
+                    if linkele:
+                        data[filetype]['uploaded_file_name'] = linkele.get('uploaded_file_name')
+                value = cell.text.strip()
+            elif n == 4:
+                divele = cell.find('div')
+                if divele:
+                    approved_by, approved_on = divele.encode_contents().decode('utf-8').split('<br/>')
+                    data[filetype]['approved_by'] = approved_by.replace("b'", "")
+                    try:
+                        data[filetype]['approved_on'] = parser.parse(approved_on)
+                    except:
+                        data[filetype]['approved_on'] = approved_on
+            elif n == 5:
+                updated_by, updated_on = cell.find('div').encode_contents().decode('utf-8').split('<br/>')
+                data[filetype]['updated_by'] = updated_by.replace("b'", "")
+                try:
+                    data[filetype]['updated_on'] = parser.parse(updated_on)
+                except:
+                    data[filetype]['updated_on'] = updated_on
+            else:
+                value = cell.text.strip()
+            if value is not None:
+                data[filetype][params[n]] = value
 
-        return data
+    return data
 
 
 def _download_to_local_file_path(self, local_dir, local_filename, parent_dir, r, force_download=False):
