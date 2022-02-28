@@ -1,7 +1,8 @@
-import os
 import pandas as pd
 import requests
+from bs4 import BeautifulSoup
 from tqdm import tqdm
+
 from .categories import categories
 from .fileutils import read_json_cache, write_json_cache
 from .google_sync import NCSEFGoogleDrive
@@ -87,14 +88,171 @@ class STEMWizardAPI(object):
         else:
             self.logger.error(f"failed to authenticate to {self.domain}")
 
+        self.get_csrf_token()
+
         return authenticated
 
-    def syncStudents(self, cache_file_name='caches/studentData.json'):
-        # get basic data about students, names, school, overall approval status
-        data_cache = self.getStudentData_by_category()
-        data_cache = self.student_file_info(data_cache, cache_file_name)
-        self.student_folder_links(data_cache)
-        data_cache = self.download_student_files_locally(data_cache)
-        write_json_cache(data_cache, cache_file_name)
-        # self.sync_students_to_google_drive(data_cache)
-        return data_cache
+    # def syncStudents(self, cache_file_name='caches/studentData.json'):
+    #     # get basic data about students, names, school, overall approval status
+    #     data_cache = self.getStudentData_by_category()
+    #     data_cache = self.student_file_info(data_cache, cache_file_name)
+    #     self.student_folder_links(data_cache)
+    #     data_cache = self.download_student_files_locally(data_cache)
+    #     write_json_cache(data_cache, cache_file_name)
+    #     # self.sync_students_to_google_drive(data_cache)
+    #     return data_cache
+
+    def studentSync(self, cache_file_name='caches/student_data.json'):
+        data_project = self.getProjectInfo()
+        write_json_cache(data_project, 'caches/student_project_data.json')
+        data_forms = self.getFilesAndForms()
+        write_json_cache(data_forms, 'caches/student_form_data.json')
+        data_files= self.getJudgesMaterials()
+        write_json_cache(data_files, 'caches/student_file_data.json')
+
+        # merge
+        student_data={}
+        for studentid in data_project.keys():
+            student_data[studentid]=data_project[studentid].copy()
+            if studentid in data_forms.keys():
+                student_data[studentid]['files']=data_forms[studentid]['files'].copy()
+            if studentid in data_files.keys():
+                student_data[studentid]['files'].update(data_files[studentid]['files'])
+        write_json_cache(data_files, 'caches/student_data.json')
+        return student_data
+
+    def getFilesAndForms(self):
+        data = {}
+        headers['X-CSRF-TOKEN'] = self.csrf
+        for category_id, category_title in tqdm(categories.items()):
+            payload = {'page': 1,
+                       'per_page': 999,
+                       'st_stmile_id': 1337,
+                       'mileName': 'Files and Forms',
+                       'division': 0,
+                       'category_select': category_id,
+                       }
+            url = f'{self.url_base}/fairadmin/getstudentCustomMilestoneDetailView'
+            r = self.session.post(url, data=payload, headers=headers)
+            soup = BeautifulSoup(r.text, 'lxml')
+            head = soup.find('thead')
+            th_labels = []
+            for th in head.find_all('th'):
+                v = th.text.strip()
+                v = v.replace('2022 NCSEF ', '')
+                if 'Research' in v:
+                    v = 'Research Plan'
+                th_labels.append(v)
+
+            body = soup.find('tbody')
+            for row in body.find_all('tr'):
+                import uuid
+                studentid = f"unknown_{uuid.uuid4()}"
+                studentdata = {'studentid': None, 'files': {}}
+                for header in th_labels[6:]:
+                    studentdata['files'][header] = {'url': None}
+                for n, td in enumerate(row.find_all('td')):
+                    if n < 5:
+                        studentdata[th_labels[n]] = td.text.strip().replace(" \n\n", ', ')
+                        a = td.find('a')
+                        if a:
+                            l = a['href']
+                            atoms = l.split('/')
+                            studentid = atoms[-2]
+                            studentdata['studentid'] = studentid
+                    else:
+                        a = td.find('a')
+                        if a:
+                            studentdata['files'][th_labels[n]] = {'url': a['href']}
+                data[studentid] = studentdata
+        return data
+
+    def getJudgesMaterials(self):
+        data = {}
+        headers['X-CSRF-TOKEN'] = self.csrf
+        for category_id, category_title in tqdm(categories.items()):
+            url = f'{self.url_base}/fairadmin/getstudentCustomMilestoneDetailView'
+            params = f'page=1&category_select={category_id}&per_page=999&st_stmile_id=3153'
+            r = self.session.post(f"{url}?{params}", headers=headers)
+            soup = BeautifulSoup(r.text, 'lxml')
+            head = soup.find('thead')
+            th_labels = []
+            for th in head.find_all('th'):
+                hasp = th.find('p')
+                if hasp:
+                    v = th.find('p').text.strip()
+                else:
+                    v = th.text.strip()
+                v = v.replace('2022 NCSEF ', '')
+                for shortname in ['Research Paper', 'Abstract', 'Quad Chart', 'Lab Notebook ',
+                                  'Project Presentation Slides', '1 minute video', '1C', '7']:
+                    if shortname.lower() in v.lower():
+                        v = shortname
+                th_labels.append(v)
+            body = soup.find('tbody')
+            for row in body.find_all('tr'):
+                import uuid
+                studentid = f"unknown_{uuid.uuid4()}"
+                studentdata = {'studentid': None, 'files': {}}
+                for header in th_labels[6:]:
+                    studentdata['files'][header] = {'url': None, 'filename': None}
+                for n, td in enumerate(row.find_all('td')):
+                    if n < 5:
+                        studentdata[th_labels[n]] = td.text.strip().replace(" \n\n", ', ')
+                        a = td.find('a')
+                        if a:
+                            l = a['href']
+                            atoms = l.split('/')
+                            studentid = atoms[-2]
+                            studentdata['studentid'] = studentid
+                    else:
+                        # /EBS-Stem/stemwizard/webroot/stemwizard/public/assets/images/milestone_uploads
+                        a = td.find('a')
+                        if a:
+                            studentdata['files'][th_labels[n]] = {'url': a['href']}
+                        else:
+                            studentdata['files'][th_labels[n]] = {'filename': td.text}
+                data[studentid] = studentdata
+        return data
+
+    def getProjectInfo(self):
+        data = {}
+        headers['X-CSRF-TOKEN'] = self.csrf
+        for category_id, category_title in tqdm(categories.items()):
+            url = f'{self.url_base}/fairadmin/getstudentCustomMilestoneDetailView'
+            params = f'page=1&category_select=&child_fair_select=&searchhere=&orderby=&sortby=&division=&class_id=&per_page=50&student_completion_status=undefined&admin_status=undefined&student_checkin_status=&student_milestone_status=&st_stmile_id=1335&grade_select=&student_activation_status=&student_activation_status=1'
+            r = self.session.post(f"{url}?{params}", headers=headers)
+            soup = BeautifulSoup(r.text, 'lxml')
+            head = soup.find('thead')
+            th_labels = []
+            for th in head.find_all('th'):
+                hasp = th.find('p')
+                if hasp:
+                    v = th.find('p').text.strip()
+                else:
+                    v = th.text.strip()
+                v = v.replace('2022 NCSEF ', '')
+                for shortname in ['Research Paper', 'Abstract', 'Quad Chart', 'Lab Notebook ',
+                                  'Project Presentation Slides', '1 minute video', '1C', '7']:
+                    if shortname.lower() in v.lower():
+                        v = shortname
+                th_labels.append(v)
+            body = soup.find('tbody')
+            for row in body.find_all('tr'):
+                studentid = row['id'].replace('updatedStudentDiv_', '')
+                data[studentid] = {}
+                for n, td in enumerate(row.find_all('td')):
+                    divs = td.find_all('div')
+                    if divs and th_labels[n] != 'Project Name':
+                        data[studentid][th_labels[n]] = []
+                        for div in divs:
+                            data[studentid][th_labels[n]].append(div.text.strip())
+                    elif th_labels[n] == 'Project Name':
+                        p = td.find('p')
+                        if p:
+                            data[studentid][th_labels[n]] = p.text.strip()
+                        else:
+                            data[studentid][th_labels[n]] = td.text.strip()
+                    else:
+                        data[studentid][th_labels[n]] = td.text.strip()
+        return data

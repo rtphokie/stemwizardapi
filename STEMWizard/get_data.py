@@ -54,7 +54,7 @@ def getCustomFilesInfo(self):
 
     url = f'{self.url_base}/fairadmin/exportmilestonereport'
 
-    pprint(payload)
+    # pprint(payload)
     # self.logger.debug(f'posting to {url} using {listname} params')
     rf = self.session.post(url, data=payload, headers=headers)
     if rf.status_code >= 300:
@@ -122,7 +122,7 @@ def download_custom_files(self, filename_local='/tmp/CustomMilestoneDetailView.x
                                             remotedir='images/milestone_uploads',
                                             referer='studentmilestonereport/region/3153/15257'
                                             )
-            pprint(all_student_data[studentid])
+            # pprint(all_student_data[studentid])
             raise
             # data_student_files_updated = self.sync_student_files_to_google_drive(studentid, data_student['files'])
 
@@ -439,55 +439,61 @@ def export_list(self, listname, purge_file=False):
     return (filename_local, df)
 
 
-def download_files_locally(self, studentid, passedfiledata):
-    filedata = passedfiledata.copy()
+def download_files_locally(self, studentid, filedata):
     student_local_dir = f"{self.parent_file_dir}/{self.region_domain}/{studentid}"
-    for documenttype, this_file_data in passedfiledata.items():
+    documenttypes=filedata.keys()
+    for documenttype in documenttypes:
         download = None
-        if this_file_data['file_name'] == 'NONE':
-            continue
-        atoms = this_file_data['file_name'].split('.')
+        try:
+            if filedata[documenttype]['file_name'] == 'NONE':
+                continue
+        except Exception as e:
+            print(e)
+            pprint(filedata[documenttype])
+            raise
+        atoms = filedata[documenttype]['file_name'].split('.')
         documenttypefortilename = simplify_filenames(documenttype)
         local_filename = f"{documenttypefortilename}.{atoms[-1]}"
         local_full_path = f"{student_local_dir}/{local_filename}"
-        filedata['file_name'] = local_filename
-        filedata['local_full_path'] = local_full_path
-        this_file_data['local_full_path'] = local_full_path
+        filedata[documenttype]['local_filename'] = local_filename
+        filedata[documenttype]['local_full_path'] = local_full_path
+        # this_file_data['local_full_path'] = local_full_path
         if os.path.exists(local_full_path):
             localmtime = datetime.fromtimestamp(os.path.getmtime(local_full_path))
-            this_file_data['local_mtime'] = localmtime
+            filedata[documenttype]['local_mtime'] = localmtime
             try:
-                if type(this_file_data['updated_on']) is str:
+                if type(filedata[documenttype]['updated_on']) is str:
                     # when cached, datetimes are serialized to strings
-                    this_file_data['updated_on'] = parser.parse(this_file_data['updated_on'])
-                download = this_file_data['updated_on'] is None or localmtime < this_file_data['updated_on']
-            except:
-                pprint(this_file_data)
+                    filedata[documenttype]['updated_on'] = parser.parse(filedata[documenttype]['updated_on'])
+                download = filedata[documenttype]['updated_on'] is None or localmtime < filedata[documenttype]['updated_on']
+            except Exception as e:
+                print(e)
+                pprint(filedata[documenttype])
                 raise
         else:
             download = True
-        download = download and this_file_data['file_status'] in ['SUBMITTED', 'APPROVED']
+        download = download and filedata[documenttype]['file_status'] in ['SUBMITTED', 'APPROVED']
         dld = os.path.isfile(local_full_path)
         download = download and not os.path.isfile(local_full_path)
         if download:
-            if this_file_data['file_name'] is None or len(this_file_data['file_name']) < 5:
+            if filedata[documenttype]['file_name'] is None or len(filedata[documenttype]['file_name']) < 5:
                 self.logger.debug(f"{documenttype} not uploaded yet by student {studentid}")
                 continue
-            if this_file_data['uploaded_file_name'] is not None:
-                thatdata = this_file_data
-                full_pathname, used_cache = self.DownloadFileFromSTEMWizard(this_file_data['file_name'],
-                                                                            this_file_data['uploaded_file_name'],
+            if filedata[documenttype]['uploaded_file_name'] is not None:
+                thatdata = filedata[documenttype]
+                full_pathname, used_cache = self.DownloadFileFromSTEMWizard(filedata[documenttype]['file_name'],
+                                                                            filedata[documenttype]['uploaded_file_name'],
                                                                             f"{studentid}", local_filename)
-            elif this_file_data['uploaded_file_name'] is None:
-                full_pathname, used_cache = self.DownloadFileFromS3Bucket(this_file_data['file_url'],
+            elif filedata[documenttype]['uploaded_file_name'] is None:
+                full_pathname, used_cache = self.DownloadFileFromS3Bucket(filedata[documenttype]['file_url'],
                                                                           f"{studentid}", local_filename)
             else:
                 self.logger.error(f"could not determine download for student {studentid} {documenttype}")
             if os.path.exists(local_full_path):
                 localmtime = datetime.fromtimestamp(os.path.getmtime(local_full_path))
-                this_file_data['local_mtime'] = localmtime
+                filedata[documenttype]['local_mtime'] = localmtime
             else:
-                this_file_data['local_mtime'] = None
+                filedata[documenttype]['local_mtime'] = None
         elif os.path.isfile(local_full_path):
             self.logger.info(f"skipping {local_full_path}")
 

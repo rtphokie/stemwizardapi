@@ -1,3 +1,4 @@
+import os
 import unittest
 from pprint import pprint
 
@@ -5,7 +6,6 @@ import pandas as pd
 
 from STEMWizard import STEMWizardAPI, google_sync
 from STEMWizard.google_sync import NCSEFGoogleDrive
-import os
 
 configfile = 'stemwizardapi.yaml'
 configfile_prod = 'stemwizardapi_ncsef.yaml'
@@ -182,17 +182,56 @@ class NCSEF_prod_TestCases_operation(unittest.TestCase):
 
 
 class devtest(unittest.TestCase):
-    def test_ggetCustomFiles(self):
+    def test_prod(self):
         uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
-        # uut.getCustomFiles()
-        uut.download_custom_files()
-        # uut.DownloadFileFromSTEMWizard('UP UP and AWAY_1644707023.pptx',
-        #                                'UP UP and AWAY_1644707023.pptx',
-        #                                '.',
-        #                                remotedir='images/milestone_uploads',
-        #                                referer='studentmilestonereport/region/3153/15257'
-        #                                )
-        # uut.getCustomFiles()
+        # data_project = uut.getProjectInfo()
+        # pprint(data_project)
+        student_data = uut.studentSync()
+        pprint(student_data)
+
+    def test_dl(self):
+        pass
+
+
+    def dtest_jkl(self):
+        fp = open('jkl.html', 'r')
+        t = fp.read()
+        fp.close()
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(t, 'lxml')
+        head = soup.find('thead')
+        headers = []
+        for th in head.find_all('th'):
+            v = th.text.strip()
+            v = v.replace('2022 NCSEF ', '')
+            if 'Research' in v:
+                v = 'Research Plan'
+            headers.append(v)
+
+        data = {}
+        body = soup.find('tbody')
+        for row in body.find_all('tr'):
+            import uuid
+            studentid = f"unknown_{uuid.uuid4()}"
+            studentdata = {'studentid': None, 'files': {}}
+            for header in headers[6:]:
+                studentdata['files'][header] = {'url': None}
+            for n, td in enumerate(row.find_all('td')):
+                if n < 5:
+                    studentdata[headers[n]] = td.text.strip().replace(" \n\n", ', ')
+                    a = td.find('a')
+                    if a:
+                        l = a['href']
+                        atoms = l.split('/')
+                        studentid = atoms[-2]
+                        studentdata['studentid'] = studentid
+                else:
+                    a = td.find('a')
+                    if a:
+                        studentdata['files'][headers[n]]={'url': a['href']}
+            data[studentid] = studentdata
+
+        pprint(data)
 
     def test_foo(self):
         local_filename = '/tmp/CustomMilestoneDetailView.xls'

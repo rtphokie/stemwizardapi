@@ -1,18 +1,4 @@
 from bs4 import BeautifulSoup
-from pprint import pprint
-import json
-import olefile
-import pandas as pd
-import requests
-import time
-import yaml
-from STEMWizard.google_sync import NCSEFGoogleDrive
-from .logstuff import get_logger
-import os
-from tqdm import tqdm
-from datetime import datetime
-from dateutil import parser
-from STEMWizard.categories import categories
 
 headers = {
     'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36'}
@@ -116,6 +102,7 @@ def _download_file(self, local_filename, rf):
     fp.flush()
     fp.close()
 
+
 def set_columns(self, listname='judge'):
     '''
     there's lots of if-then-else going on here because of inconsistencies in naming across
@@ -208,6 +195,7 @@ def set_columns(self, listname='judge'):
     r2 = self.session.post(url2, data=payload, headers=headers)
     if r2.status_code != 200:
         raise ValueError(f"status code {r2.status_code} from POST to {url2}")
+
 
 def get_csrf_token(self):
     if self.csrf is None:
