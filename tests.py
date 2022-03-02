@@ -2,9 +2,8 @@ import os
 import unittest
 from pprint import pprint
 
-import pandas as pd
-
 from STEMWizard import STEMWizardAPI, google_sync
+from STEMWizard.fileutils import write_json_cache
 from STEMWizard.google_sync import NCSEFGoogleDrive
 
 configfile = 'stemwizardapi.yaml'
@@ -182,111 +181,50 @@ class NCSEF_prod_TestCases_operation(unittest.TestCase):
 
 
 class devtest(unittest.TestCase):
-    def test_prod(self):
+
+    def testjkl(self):
         uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
-        # data_project = uut.getProjectInfo()
-        # pprint(data_project)
-        student_data = uut.studentSync()
-        pprint(student_data)
-
-    def test_dl(self):
-        pass
-
-
-    def dtest_jkl(self):
-        fp = open('jkl.html', 'r')
-        t = fp.read()
-        fp.close()
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(t, 'lxml')
-        head = soup.find('thead')
-        headers = []
-        for th in head.find_all('th'):
-            v = th.text.strip()
-            v = v.replace('2022 NCSEF ', '')
-            if 'Research' in v:
-                v = 'Research Plan'
-            headers.append(v)
-
-        data = {}
-        body = soup.find('tbody')
-        for row in body.find_all('tr'):
-            import uuid
-            studentid = f"unknown_{uuid.uuid4()}"
-            studentdata = {'studentid': None, 'files': {}}
-            for header in headers[6:]:
-                studentdata['files'][header] = {'url': None}
-            for n, td in enumerate(row.find_all('td')):
-                if n < 5:
-                    studentdata[headers[n]] = td.text.strip().replace(" \n\n", ', ')
-                    a = td.find('a')
-                    if a:
-                        l = a['href']
-                        atoms = l.split('/')
-                        studentid = atoms[-2]
-                        studentdata['studentid'] = studentid
-                else:
-                    a = td.find('a')
-                    if a:
-                        studentdata['files'][headers[n]]={'url': a['href']}
-            data[studentid] = studentdata
-
+        data = uut.getJudgesMaterials()
         pprint(data)
+        write_json_cache(data, 'caches/foo.json')
 
-    def test_foo(self):
-        local_filename = '/tmp/CustomMilestoneDetailView.xls'
-        import olefile
+        # write_json_cache(data, 'caches/student_project_data.json')
+        # for k, v in data.items():
+        #     print(k, v['First Name'], v['Last Name'])
 
-        ole = olefile.OleFileIO(local_filename)
-        df = pd.read_excel(ole.openstream('Workbook'), engine='xlrd')
-        print(df)
-
-    def dtest_google_clean_empty_dirs(self):
-        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False)
-        parentid = '1wiIOz_ZdPHoOBNjJcb1HX-L2NqX5urQx'
-        ids = set()
-        for id, data in uut.googleapi.ids.items():
-            if 'folder' not in data['mimeType']:
-                continue
-            if len(data['parents']) < 1:
-                continue
-            if data['parents'][0]['id'] != parentid:
-                continue  # not in by internal id
-            print(data['title'])
-            if data['labels']['trashed']:
-                pprint(data)
-                raise
-            ids.add(id)
-        print('--' * 20)
-        print(len(ids))
-        from tqdm import tqdm
-        for id in tqdm(ids):
-            item = uut.googleapi.drive.CreateFile({'id': data['id']})
-            item.Trash()
+    def test_student_data(self):
+        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
+        student_data = uut.studentSync()
+        # for id, v in student_data.items():
+        #     project_number = v['Project Number']
+        #     div, cat, no = project_number.split('-')
+        #     print(div, cat, no)
+        #     for file in v['files'].keys():
+        #         print(f" {file}")
 
 
 class NCSEF_prod_TestCases(unittest.TestCase):
 
     def test_student_data(self):
-        uut = STEMWizardAPI(configfile=configfile_prod)
-        data = uut.syncStudents()
-        print(len(data))
-
-    def dtest_sync_to_google_drive(self):
-        uut = STEMWizardAPI(configfile=configfile_prod)
-
-        cache_filename = 'student_data_cache.json'
-        cache = uut.read_json_cache(cache_filename, 6000)
-        pprint(cache.keys())
-        uut.sync_student_files_to_google_drive(cache['57344'], 57344)
-        # 57344
-
-    def dtest_filedownload_from_stemwizard(self):
-        # <a style="cursor: pointer;text-decoration:none;" class="file_download" id="file_download"
-        # original_file="Rose Research Plan.docx" uploaded_file_name="Rose Research Plan_63561_164230152536.docx">Rose Research Plan.docx</a>
-        url = 'https://ncsef.stemwizard.com/fairadmin/fileDownload'
-        uut = STEMWizardAPI(configfile=configfile_prod)
-        fn = uut.DownloadFileFromSTEMWizard('Rose Research Plan.doc', 'Rose Research Plan_63561_164230152536.docx')
+        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False, login_google=False)
+        student_data = uut.studentSync()
+        # pprint(student_data)
+    #
+    # def dtest_sync_to_google_drive(self):
+    #     uut = STEMWizardAPI(configfile=configfile_prod)
+    #
+    #     cache_filename = 'student_data_cache.json'
+    #     cache = uut.read_json_cache(cache_filename, 6000)
+    #     pprint(cache.keys())
+    #     uut.sync_student_files_to_google_drive(cache['57344'], 57344)
+    #     # 57344
+    #
+    # def dtest_filedownload_from_stemwizard(self):
+    #     # <a style="cursor: pointer;text-decoration:none;" class="file_download" id="file_download"
+    #     # original_file="Rose Research Plan.docx" uploaded_file_name="Rose Research Plan_63561_164230152536.docx">Rose Research Plan.docx</a>
+    #     url = 'https://ncsef.stemwizard.com/fairadmin/fileDownload'
+    #     uut = STEMWizardAPI(configfile=configfile_prod)
+    #     fn = uut.DownloadFileFromSTEMWizard('Rose Research Plan.doc', 'Rose Research Plan_63561_164230152536.docx')
 
 
 if __name__ == '__main__':

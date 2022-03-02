@@ -1,49 +1,16 @@
-from bs4 import BeautifulSoup
-from pprint import pprint
-import olefile
-import pandas as pd
 import os
 from datetime import datetime
-from tqdm import tqdm
+from pprint import pprint
+
+import olefile
+import pandas as pd
+from bs4 import BeautifulSoup
 from dateutil import parser
+from tqdm import tqdm
+
 from STEMWizard.categories import categories
-from .utils import headers
 from .fileutils import read_json_cache, write_json_cache
-
-
-def DownloadFileFromS3Bucket(self, url, local_dir, local_filename, parent_dir=f'files'):
-    # self.logger.debug(f"DownloadFileFromS3Bucket: downloading {url} to {local_dir} as {local_filename} from S3")
-    r = self.session.get(url)
-
-    if r.status_code >= 300:
-        self.logger.error(f"status code {r.status_code} on post to {url}")
-        return
-
-    return self._download_to_local_file_path(local_dir, local_filename, parent_dir, r)
-
-
-def DownloadFileFromSTEMWizard(self, original_file, uploaded_file_name, local_dir,
-                               remotedir='uploads/project_files',
-                               parent_dir=f'files',
-                               referer='FilesAndForms',
-                               ):
-    self.logger.debug(
-        f"DownloadFileFromSTEMWizard: downloading {original_file} to {local_dir} as {original_file} from STEMWizard")
-    self.get_csrf_token()
-    headers['X-CSRF-TOKEN'] = self.csrf
-    headers['Referer'] = f'{self.url_base}f/fairadmin/{referer}'
-    url = f'{self.url_base}/fairadmin/fileDownload'
-
-    payload = {'_token': self.token,
-               'download_filen_path': f'/EBS-Stem/stemwizard/webroot/stemwizard/public/assets/{remotedir}',
-               'download_hideData': uploaded_file_name,
-               }
-
-    rf = self.session.post(url, data=payload, headers=headers)
-    if rf.status_code >= 300:
-        self.logger.error(f"status code {rf.status_code} on post to {url}")
-        return
-    return self._download_to_local_file_path(local_dir, original_file, parent_dir, rf)
+from .utils import headers
 
 
 def getCustomFilesInfo(self):
@@ -200,6 +167,7 @@ def process_student_data_row(self, cell, studentid):
         data[param] = value
     return data
 
+
 def student_file_detail(self, studentId, info_id):
     self.logger.debug(f"getting file details for {studentId}")
     self.get_csrf_token()
@@ -278,30 +246,6 @@ def student_file_detail(self, studentId, info_id):
                 data[filetype][params[n]] = value
 
     return data
-
-
-def _download_to_local_file_path(self, local_dir, local_filename, parent_dir, r, force_download=False):
-    target_dir = f"{parent_dir}/{self.region_domain}/{local_dir}"
-    full_pathname = f"{target_dir}/{local_filename}"
-    used_cache = None
-    if not os.path.isfile(full_pathname):
-        os.makedirs(target_dir, exist_ok=True)
-        if r.status_code >= 300:
-            raise Exception(f'{r.status_code}')
-        if r.headers['Content-Type'] == 'text/html':
-            self.logger.error(f"failed to download {local_filename}")
-        else:
-            f = open(full_pathname, 'wb')
-            for chunk in r.iter_content(chunk_size=512 * 1024):
-                if chunk:  # filter out keep-alive new chunks
-                    f.write(chunk)
-            f.close()
-            self.logger.info(f"download_to_local_file_path: downloaded to {full_pathname}")
-            used_cache = False
-    else:
-        used_cache = True
-        self.logger.debug(f"download_to_local_file_path: using existing {full_pathname}")
-    return full_pathname, used_cache
 
 
 def sync_student_files_to_google_drive(self, studentid, filedata):
@@ -441,7 +385,7 @@ def export_list(self, listname, purge_file=False):
 
 def download_files_locally(self, studentid, filedata):
     student_local_dir = f"{self.parent_file_dir}/{self.region_domain}/{studentid}"
-    documenttypes=filedata.keys()
+    documenttypes = filedata.keys()
     for documenttype in documenttypes:
         download = None
         try:
@@ -465,7 +409,8 @@ def download_files_locally(self, studentid, filedata):
                 if type(filedata[documenttype]['updated_on']) is str:
                     # when cached, datetimes are serialized to strings
                     filedata[documenttype]['updated_on'] = parser.parse(filedata[documenttype]['updated_on'])
-                download = filedata[documenttype]['updated_on'] is None or localmtime < filedata[documenttype]['updated_on']
+                download = filedata[documenttype]['updated_on'] is None or localmtime < filedata[documenttype][
+                    'updated_on']
             except Exception as e:
                 print(e)
                 pprint(filedata[documenttype])
@@ -482,7 +427,8 @@ def download_files_locally(self, studentid, filedata):
             if filedata[documenttype]['uploaded_file_name'] is not None:
                 thatdata = filedata[documenttype]
                 full_pathname, used_cache = self.DownloadFileFromSTEMWizard(filedata[documenttype]['file_name'],
-                                                                            filedata[documenttype]['uploaded_file_name'],
+                                                                            filedata[documenttype][
+                                                                                'uploaded_file_name'],
                                                                             f"{studentid}", local_filename)
             elif filedata[documenttype]['uploaded_file_name'] is None:
                 full_pathname, used_cache = self.DownloadFileFromS3Bucket(filedata[documenttype]['file_url'],

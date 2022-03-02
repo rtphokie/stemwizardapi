@@ -13,20 +13,6 @@ headers = {
 logger = get_logger('cache_json')
 
 
-def read_config(self, configfile):
-    """
-    reads named yaml configuration file
-    :param configfile: (defaulted to stemwizardapi.yaml above)
-    :return: nothing, updates username, password and token attribuates on the object
-    """
-    fp = open(configfile, 'r')
-    data_loaded = yaml.safe_load(fp)
-    self.domain = data_loaded['domain']
-    self.username = data_loaded['username']
-    self.password = data_loaded['password']
-    fp.close()
-
-
 def write_json_cache(cache, cache_filename):
     fp = open(cache_filename, 'w')
     json.dump(cache, fp, indent=2, default=str)
