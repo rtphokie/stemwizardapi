@@ -182,49 +182,38 @@ class NCSEF_prod_TestCases_operation(unittest.TestCase):
 
 class devtest(unittest.TestCase):
 
-    def testjkl(self):
+    def test_getJudgesMaterials(self):
         uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
         data = uut.getJudgesMaterials()
         pprint(data)
         write_json_cache(data, 'caches/foo.json')
 
-        # write_json_cache(data, 'caches/student_project_data.json')
-        # for k, v in data.items():
-        #     print(k, v['First Name'], v['Last Name'])
-
-    def test_student_data(self):
+    def test_getFilesAndForms(self):
         uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
-        student_data = uut.studentSync()
-        # for id, v in student_data.items():
-        #     project_number = v['Project Number']
-        #     div, cat, no = project_number.split('-')
-        #     print(div, cat, no)
-        #     for file in v['files'].keys():
-        #         print(f" {file}")
+        data = uut.get_files_and_forms()
+        pprint(data)
+        write_json_cache(data, 'caches/foo.json')
+
+    def test_studentSync(self):
+        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
+        data = uut.studentSync(download=False, upload=False)
+
+    def test_patch_team_filepaths(self):
+        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=True, login_google=False)
+        # data = uut.student_file_detail(55813, None)
+        # pprint(data)
+        data = uut.studentSync(download=False, upload=False)
+        # uut.patch_team_filepaths(data)
+
+
 
 
 class NCSEF_prod_TestCases(unittest.TestCase):
 
     def test_student_data(self):
-        uut = STEMWizardAPI(configfile=configfile_prod, login_stemwizard=False, login_google=False)
+        uut = STEMWizardAPI(configfile=configfile_prod,
+                            login_stemwizard=False, login_google=True)
         student_data = uut.studentSync()
-        # pprint(student_data)
-    #
-    # def dtest_sync_to_google_drive(self):
-    #     uut = STEMWizardAPI(configfile=configfile_prod)
-    #
-    #     cache_filename = 'student_data_cache.json'
-    #     cache = uut.read_json_cache(cache_filename, 6000)
-    #     pprint(cache.keys())
-    #     uut.sync_student_files_to_google_drive(cache['57344'], 57344)
-    #     # 57344
-    #
-    # def dtest_filedownload_from_stemwizard(self):
-    #     # <a style="cursor: pointer;text-decoration:none;" class="file_download" id="file_download"
-    #     # original_file="Rose Research Plan.docx" uploaded_file_name="Rose Research Plan_63561_164230152536.docx">Rose Research Plan.docx</a>
-    #     url = 'https://ncsef.stemwizard.com/fairadmin/fileDownload'
-    #     uut = STEMWizardAPI(configfile=configfile_prod)
-    #     fn = uut.DownloadFileFromSTEMWizard('Rose Research Plan.doc', 'Rose Research Plan_63561_164230152536.docx')
 
 
 if __name__ == '__main__':

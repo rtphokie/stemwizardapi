@@ -71,7 +71,7 @@ class NCRegTestTestCases(unittest.TestCase):
 
     def test_file_detail(self):
         uut = STEMWizardAPI(configfile=configfile)
-        data = uut.student_file_detail(53240, 61630)
+        data = uut._student_file_detail(53240, 61630)
         self.assertGreaterEqual(len(data), 3)
 
     def test_export(self):

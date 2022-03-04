@@ -1,9 +1,7 @@
-from pprint import pprint
 import json
 import olefile
 import pandas as pd
 import time
-import yaml
 import os
 from .logstuff import get_logger
 
@@ -14,6 +12,12 @@ logger = get_logger('cache_json')
 
 
 def write_json_cache(cache, cache_filename):
+    '''
+    writes object to human readable JSON cache, forces to STR when necessary to seamlessly handle date objects
+    :param cache: object to cache
+    :param cache_filename: filename to use
+    :return: nothing
+    '''
     fp = open(cache_filename, 'w')
     json.dump(cache, fp, indent=2, default=str)
     fp.close()
@@ -21,6 +25,12 @@ def write_json_cache(cache, cache_filename):
 
 
 def read_json_cache(cache_filename, max_cache_age=600):
+    '''
+    reads from specified filename, returns empty dictionary if the file is too old
+    :param cache_filename: json filename
+    :param max_cache_age: maximum age in seconds
+    :return: object (usually a dictionary) read from cache, empty dictionary if file is not found or too old
+    '''
     try:
         if os.path.isfile(cache_filename):
             st = os.stat(cache_filename)
@@ -42,15 +52,15 @@ def read_json_cache(cache_filename, max_cache_age=600):
         cache = {}
     return cache
 
-
-def xlsfile_to_df(local_filename):
-    ole = olefile.OleFileIO(local_filename)
-    df = pd.read_excel(ole.openstream('Workbook'), engine='xlrd')
-    return df
-
-
-def safe_rm_file(local_filename):
-    try:
-        os.remove(local_filename)
-    except OSError as e:
-        print(f'failed to remove {local_filename} {e}')
+#
+# def xlsfile_to_df(local_filename):
+#     ole = olefile.OleFileIO(local_filename)
+#     df = pd.read_excel(ole.openstream('Workbook'), engine='xlrd')
+#     return df
+#
+#
+# def safe_rm_file(local_filename):
+#     try:
+#         os.remove(local_filename)
+#     except OSError as e:
+#         print(f'failed to remove {local_filename} {e}')

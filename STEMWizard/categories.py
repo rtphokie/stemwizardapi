@@ -23,8 +23,8 @@ categories = {
     "29483": "Math/Data Science - SR",
     'undefined': 'undefined',
 }
-
-divisions={'foo': 'ELE',
-           'foo2': 'JR',
-           'foo3': 'SR',
-           }
+#
+# divisions={'foo': 'ELE',
+#            'foo2': 'JR',
+#            'foo3': 'SR',
+#            }
